@@ -1,0 +1,24 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./pipeline/data/output:/data:ro
+    env_file:
+      - .env
+    environment:
+      - DUCKDB_PATH=/data/testa_de_ferro.duckdb
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    restart: unless-stopped
