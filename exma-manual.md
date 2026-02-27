@@ -8,6 +8,8 @@ Version 1.0
 
 January 2026
 
+Author: @lionartmartins
+
 # Table of Contents
 
 # Part I: Foundations
@@ -118,12 +120,12 @@ In "A Philosophy of Software Design", Ousterhout introduces the depth metric: th
 
 ### Practical Metrics
 
-| Metric              | Recommended Limit | Reason                       |
-| ------------------- | ----------------- | ---------------------------- |
-| Cyclomatic complexity | < 10 per function | Limits execution paths       |
-| Nesting depth       | < 4 levels        | Reduces cognitive load       |
-| Line length         | < 120 characters  | Improves readability         |
-| File size           | 200-400 lines     | Fits in the context window   |
+| Metric                | Recommended Limit | Reason                     |
+| --------------------- | ----------------- | -------------------------- |
+| Cyclomatic complexity | < 10 per function | Limits execution paths     |
+| Nesting depth         | < 4 levels        | Reduces cognitive load     |
+| Line length           | < 120 characters  | Improves readability       |
+| File size             | 200-400 lines     | Fits in the context window |
 
 ### Practical Rule
 
