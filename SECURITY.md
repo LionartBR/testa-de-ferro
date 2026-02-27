@@ -4,7 +4,7 @@
 
 **Nunca** abra uma issue pública para reportar vulnerabilidades de segurança.
 
-Use o [GitHub Security Advisories](https://github.com/OWNER/testa-de-ferro/security/advisories/new) para reportar de forma privada, ou envie email para: **security@TROCAR_DOMINIO.com**
+Use o [GitHub Security Advisories](https://github.com/OWNER/testa-de-ferro/security/advisories/new) para reportar de forma privada.
 
 ### O que reportar
 
@@ -25,11 +25,11 @@ Use o [GitHub Security Advisories](https://github.com/OWNER/testa-de-ferro/secur
 
 ## Tempo de Resposta
 
-| Etapa           | Prazo       |
-| --------------- | ----------- |
-| Triagem inicial | 72 horas    |
-| Confirmação     | 7 dias      |
-| Correção        | 30 dias     |
+| Etapa           | Prazo    |
+| --------------- | -------- |
+| Triagem inicial | 72 horas |
+| Confirmação     | 7 dias   |
+| Correção        | 30 dias  |
 
 Vulnerabilidades críticas (vazamento de CPF, SQL injection) são priorizadas acima de qualquer feature.
 
