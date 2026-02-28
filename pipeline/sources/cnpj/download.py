@@ -33,6 +33,9 @@ def download_cnpj(url: str, raw_dir: Path, timeout: int = 300) -> Path:
     If the URL starts with the old dadosabertos.rfb.gov.br domain, it is
     transparently rewritten to the new WebDAV endpoint.
 
+    If the ZIP already exists on disk and contains an extractable file, the
+    download is skipped and the previously extracted file is returned.
+
     Args:
         url:     Full URL or WebDAV path of the CNPJ ZIP file.
         raw_dir: Directory where raw files should be saved. Created if absent.
@@ -66,27 +69,36 @@ def download_cnpj(url: str, raw_dir: Path, timeout: int = 300) -> Path:
 
     zip_path = raw_dir / zip_name
 
-    with httpx.stream(
-        "GET",
-        actual_url,
-        timeout=timeout,
-        follow_redirects=True,
-        headers=headers,
-    ) as response:
-        response.raise_for_status()
-        downloaded = 0
-        with zip_path.open("wb") as file_handle:
-            for chunk in response.iter_bytes(chunk_size=8 * 1024 * 1024):
-                file_handle.write(chunk)
-                downloaded += len(chunk)
-                if downloaded % (50 * 1024 * 1024) < len(chunk):
-                    log(f"  {zip_name}: {downloaded // (1024 * 1024)} MB downloaded...")
+    # Skip download if ZIP already exists on disk.
+    if not zip_path.exists():
+        with httpx.stream(
+            "GET",
+            actual_url,
+            timeout=timeout,
+            follow_redirects=True,
+            headers=headers,
+        ) as response:
+            response.raise_for_status()
+            downloaded = 0
+            with zip_path.open("wb") as file_handle:
+                for chunk in response.iter_bytes(chunk_size=8 * 1024 * 1024):
+                    file_handle.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded % (50 * 1024 * 1024) < len(chunk):
+                        log(f"  {zip_name}: {downloaded // (1024 * 1024)} MB downloaded...")
+    else:
+        log(f"  {zip_name}: already exists, skipping download")
 
-    # Extract the first CSV from the ZIP archive.
+    # Extract the first CSV-like file from the ZIP archive.
+    # ADR: Receita Federal uses non-standard names like "K3241...SOCIOCSV" and
+    # "K3241...EMPRECSV" (no .csv extension). We match files containing "CSV"
+    # in the name OR ending with .csv. If neither matches, extract the first file.
     with zipfile.ZipFile(zip_path) as archive:
-        csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
-        if not csv_names:
-            raise FileNotFoundError(f"No CSV found inside {zip_path}")
-        archive.extract(csv_names[0], raw_dir)
+        all_names = archive.namelist()
+        csv_names = [n for n in all_names if n.lower().endswith(".csv") or "csv" in n.lower()]
+        target = csv_names[0] if csv_names else (all_names[0] if all_names else None)
+        if target is None:
+            raise FileNotFoundError(f"No files found inside {zip_path}")
+        archive.extract(target, raw_dir)
 
-    return raw_dir / csv_names[0]
+    return raw_dir / target

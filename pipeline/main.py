@@ -413,6 +413,9 @@ def _run_sources(config: PipelineConfig) -> None:
     t = config.download_timeout
 
     # ---- Phase 1: Parallel downloads ----
+    # ADR: rais, juntas_comerciais, and comprasnet are optional enrichment sources.
+    # run_pipeline already handles their absence (if-exists checks on staging parquets).
+    # Failures in these sources should not abort the entire pipeline.
     log("Downloading all sources in parallel...")
     download_tasks: dict[str, tuple[Callable[[str, Path, int], Path], str, Path, int]] = {
         "cnpj_empresas": (download_cnpj, urls.cnpj_empresas, raw_dir / "cnpj", t),
@@ -424,9 +427,13 @@ def _run_sources(config: PipelineConfig) -> None:
         "servidores": (download_servidores, urls.servidores, raw_dir / "servidores", t),
         "tse": (download_doacoes, urls.tse_doacoes, raw_dir / "tse", t),
         "rais": (download_rais, urls.rais, raw_dir / "rais", t),
-        "juntas_comerciais": (download_juntas_comerciais, urls.juntas_comerciais, raw_dir / "juntas_comerciais", t),
+        # ADR: juntas_comerciais (Estabelecimentos0.zip) is ~6.3 GB decompressed and
+        # causes MemoryError when parsed in parallel with other sources. Disabled for
+        # the initial pipeline run. Re-enable when streaming parse is implemented.
+        # "juntas_comerciais": (download_juntas_comerciais, urls.juntas_comerciais, raw_dir / "juntas_comerciais", t),
         "comprasnet": (download_comprasnet, urls.comprasnet_base, raw_dir / "comprasnet", t),
     }
+    optional_sources = {"rais", "juntas_comerciais", "comprasnet"}
 
     raw_paths: dict[str, Path] = {}
     with ThreadPoolExecutor(max_workers=len(download_tasks)) as pool:
@@ -435,8 +442,14 @@ def _run_sources(config: PipelineConfig) -> None:
         }
         for future in as_completed(future_to_name):
             name = future_to_name[future]
-            raw_paths[name] = future.result()  # raises on error
-            log(f"  Downloaded: {name}")
+            try:
+                raw_paths[name] = future.result()
+                log(f"  Downloaded: {name}")
+            except Exception as exc:
+                if name in optional_sources:
+                    log(f"  WARNING: optional source '{name}' failed: {exc}. Skipping.")
+                else:
+                    raise
 
     # ---- Phase 2: Parse + validate (parallel — Polars releases the GIL internally) ----
     # ADR: ThreadPoolExecutor gives near-linear speedup here because Polars CSV/JSON
@@ -483,27 +496,33 @@ def _run_sources(config: PipelineConfig) -> None:
             lambda: validate_doacoes(parse_doacoes(raw_paths["tse"])),
             staging_dir / "doacoes.parquet",
         ),
-        "rais": (
+    }
+    # Only add optional parse tasks if their downloads succeeded
+    if "rais" in raw_paths:
+        parse_tasks["rais"] = (
             lambda: validate_rais(parse_rais(raw_paths["rais"])),
             staging_dir / "rais.parquet",
-        ),
-        "juntas_comerciais": (
+        )
+    if "juntas_comerciais" in raw_paths:
+        parse_tasks["juntas_comerciais"] = (
             lambda: validate_qsa_diffs(parse_qsa_diffs(raw_paths["juntas_comerciais"])),
             staging_dir / "juntas_comerciais.parquet",
-        ),
-        "comprasnet": (
+        )
+    if "comprasnet" in raw_paths:
+        parse_tasks["comprasnet"] = (
             lambda: validate_comprasnet(parse_comprasnet(raw_paths["comprasnet"])),
             staging_dir / "comprasnet.parquet",
-        ),
-    }
+        )
 
-    with ThreadPoolExecutor(max_workers=len(parse_tasks)) as pool:
+    # ADR: limit parse workers to 4 to cap peak memory. The empresas CSV (~2 GB)
+    # and PNCP parquets (~90 MB) are the largest; running all in parallel can OOM.
+    with ThreadPoolExecutor(max_workers=min(4, len(parse_tasks))) as pool:
         parse_futures: dict[Future[int], str] = {
             pool.submit(_parse_and_write, fn, path): name for name, (fn, path) in parse_tasks.items()
         }
         for parse_future in as_completed(parse_futures):
             name = parse_futures[parse_future]
-            count = parse_future.result()  # raises on error, aborting the pipeline
+            count = parse_future.result()
             log(f"  Parsed {name}: {count:,} rows")
 
 

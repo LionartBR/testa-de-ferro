@@ -62,20 +62,23 @@ def download_servidores(url: str, raw_dir: Path, timeout: int = 300) -> Path:
     stripped = url.rstrip("/")
     yyyymm = _scrape_latest_month(stripped, timeout)
     resolved = f"{stripped}/{yyyymm}_{_ORIGEM}"
-    log(f"  Resolved servidores → {yyyymm}_{_ORIGEM}")
+    log(f"  Resolved servidores -> {yyyymm}_{_ORIGEM}")
 
     zip_name = f"servidores_{yyyymm}.zip"
     zip_path = raw_dir / zip_name
 
-    with httpx.stream("GET", resolved, timeout=timeout, follow_redirects=True) as resp:
-        resp.raise_for_status()
-        downloaded = 0
-        with zip_path.open("wb") as fh:
-            for chunk in resp.iter_bytes(chunk_size=8 * 1024 * 1024):
-                fh.write(chunk)
-                downloaded += len(chunk)
-                if downloaded % (50 * 1024 * 1024) < len(chunk):
-                    log(f"  {zip_name}: {downloaded // (1024 * 1024)} MB downloaded...")
+    if not zip_path.exists():
+        with httpx.stream("GET", resolved, timeout=timeout, follow_redirects=True) as resp:
+            resp.raise_for_status()
+            downloaded = 0
+            with zip_path.open("wb") as fh:
+                for chunk in resp.iter_bytes(chunk_size=8 * 1024 * 1024):
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded % (50 * 1024 * 1024) < len(chunk):
+                        log(f"  {zip_name}: {downloaded // (1024 * 1024)} MB downloaded...")
+    else:
+        log(f"  {zip_name}: already exists, skipping download")
 
     with zipfile.ZipFile(zip_path) as archive:
         csv_names = [n for n in archive.namelist() if n.lower().endswith(".csv")]

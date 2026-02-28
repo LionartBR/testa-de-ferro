@@ -58,6 +58,12 @@ def download_pncp(
     windows_tmp = raw_dir / "pncp_windows_tmp"
     windows_final = raw_dir / "pncp_windows"
 
+    # Skip download if final directory already exists with parquet files.
+    if windows_final.exists() and any(windows_final.glob("*.parquet")):
+        existing = list(windows_final.glob("*.parquet"))
+        log(f"  PNCP: {len(existing)} window files already exist, skipping download")
+        return windows_final
+
     # Clean stale temp dir from a previous crashed run.
     if windows_tmp.exists():
         shutil.rmtree(windows_tmp)

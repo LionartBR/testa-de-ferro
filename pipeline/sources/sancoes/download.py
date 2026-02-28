@@ -74,20 +74,23 @@ def _download_and_extract(url: str, raw_dir: Path, timeout: int) -> Path:
     else:
         date_suffix = _scrape_latest_date(stripped, timeout)
         resolved = f"{stripped}/{date_suffix}"
-        log(f"  Resolved {last_segment} → {date_suffix}")
+        log(f"  Resolved {last_segment} -> {date_suffix}")
 
     zip_name = stripped.split("/")[-1] + ".zip"
     zip_path = raw_dir / zip_name
 
-    with httpx.stream("GET", resolved, timeout=timeout, follow_redirects=True) as resp:
-        resp.raise_for_status()
-        downloaded = 0
-        with zip_path.open("wb") as fh:
-            for chunk in resp.iter_bytes(chunk_size=8 * 1024 * 1024):
-                fh.write(chunk)
-                downloaded += len(chunk)
-                if downloaded % (50 * 1024 * 1024) < len(chunk):
-                    log(f"  {zip_name}: {downloaded // (1024 * 1024)} MB downloaded...")
+    if not zip_path.exists():
+        with httpx.stream("GET", resolved, timeout=timeout, follow_redirects=True) as resp:
+            resp.raise_for_status()
+            downloaded = 0
+            with zip_path.open("wb") as fh:
+                for chunk in resp.iter_bytes(chunk_size=8 * 1024 * 1024):
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded % (50 * 1024 * 1024) < len(chunk):
+                        log(f"  {zip_name}: {downloaded // (1024 * 1024)} MB downloaded...")
+    else:
+        log(f"  {zip_name}: already exists, skipping download")
 
     with zipfile.ZipFile(zip_path) as archive:
         csv_names = [n for n in archive.namelist() if n.lower().endswith(".csv")]

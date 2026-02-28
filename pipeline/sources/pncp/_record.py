@@ -42,6 +42,17 @@ CONTRATOS_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
 def extract_record(record: dict[str, Any], index: int) -> dict[str, Any]:
     """Extract a flat dict from a PNCP contract record.
 
+    Handles two response formats:
+      - **Real API** (v1/contratos): supplier CNPJ is a flat field ``niFornecedor``,
+        vigência end date is ``dataVigenciaFim``, and modalidade lives inside
+        ``categoriaProcesso``.
+      - **Test fixture** (sample_pncp.json): supplier is a nested ``fornecedor``
+        object with ``cnpjFormatado``, vigência is ``dataVigencia``, and
+        ``modalidadeNome`` / ``modalidadeCodigo`` are top-level.
+
+    The function tries the real API field first and falls back to the legacy
+    fixture field so both paths produce correct data.
+
     Args:
         record: Single contract object from the PNCP API JSON response.
         index:  Row index used as pk_contrato placeholder.
@@ -50,22 +61,44 @@ def extract_record(record: dict[str, Any], index: int) -> dict[str, Any]:
         Flat dict with all columns required for fato_contrato staging.
     """
     orgao = record.get("orgaoEntidade", {}) or {}
-    fornecedor = record.get("fornecedor", {}) or {}
+
+    # --- cnpj_fornecedor ---
+    # Real API: flat ``niFornecedor`` (unformatted CNPJ, e.g. "55623647000161").
+    # Test fixture: nested ``fornecedor.cnpjFormatado`` (formatted, e.g. "11.222.333/0001-81").
+    cnpj_fornecedor = record.get("niFornecedor")
+    if cnpj_fornecedor is None:
+        fornecedor_obj = record.get("fornecedor", {}) or {}
+        cnpj_fornecedor = fornecedor_obj.get("cnpjFormatado")
+    # Strip formatting (dots, slashes, dashes) so downstream always sees raw digits.
+    if cnpj_fornecedor is not None:
+        cnpj_fornecedor = str(cnpj_fornecedor).replace(".", "").replace("/", "").replace("-", "")
+
+    # --- data_vigencia ---
+    # Real API: ``dataVigenciaFim``.  Test fixture: ``dataVigencia``.
+    data_vigencia = record.get("dataVigenciaFim") or record.get("dataVigencia")
+
+    # --- modalidade ---
+    # Real API: ``categoriaProcesso`` dict with ``id`` and ``nome``.
+    # Test fixture: ``modalidadeNome`` and ``modalidadeCodigo`` at top level.
+    categoria = record.get("categoriaProcesso", {}) or {}
+    modalidade_nome = record.get("modalidadeNome") or categoria.get("nome")
+    modalidade_codigo_raw = record.get("modalidadeCodigo") or categoria.get("id")
+    modalidade_codigo = str(modalidade_codigo_raw) if modalidade_codigo_raw is not None else ""
 
     return {
         "pk_contrato": index + 1,
         "num_licitacao": record.get("numeroContratoEmpenho"),
-        "cnpj_fornecedor": fornecedor.get("cnpjFormatado"),
+        "cnpj_fornecedor": cnpj_fornecedor,
         "codigo_orgao": orgao.get("cnpj"),
         "nome_orgao": orgao.get("razaoSocial"),
         "poder_orgao": orgao.get("poderId"),
         "esfera_orgao": orgao.get("esferaId"),
-        "modalidade_nome": record.get("modalidadeNome"),
-        "modalidade_codigo": str(record.get("modalidadeCodigo", "") or ""),
+        "modalidade_nome": modalidade_nome,
+        "modalidade_codigo": modalidade_codigo,
         "valor": record.get("valorInicial"),
         "objeto": record.get("objetoContrato"),
         "data_assinatura": record.get("dataAssinatura"),
-        "data_vigencia": record.get("dataVigencia"),
+        "data_vigencia": data_vigencia,
         "fk_fornecedor": None,
         "fk_orgao": None,
         "fk_tempo": None,

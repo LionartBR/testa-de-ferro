@@ -2,22 +2,22 @@
 #
 # Parse Receita Federal QSA (Quadro de Sócios e Administradores) CSV.
 #
-# Design decisions:
-#   - QSA CPFs arrive partially masked from Receita ("***222333**"). The
-#     visible middle digits are preserved as-is for the match_servidor_socio
-#     transform. The cpf_parcial column carries the raw masked string.
-#   - QUALIFICACAO_SOCIO is kept as a numeric string (Receita codebook) — it
-#     is mapped to a human-readable label in the transform layer once the full
-#     codebook is loaded. Storing the code here avoids hard-coding all 70+ codes.
-#   - DATA_ENTRADA follows the YYYYMMDD format identical to empresas.
-#   - The output targets the bridge_fornecedor_socio staging schema. The
-#     pk_socio and fk_fornecedor FK resolution happens in the transform layer
-#     after both dim_fornecedor and dim_socio are built.
+# ADR: The Receita Federal Socios CSV has NO header row.
+# Layout (11 columns, semicolon-separated, Latin-1):
+#   col0: CNPJ_BASICO (8 digits)
+#   col1: IDENTIFICADOR_SOCIO (1=PJ, 2=PF, 3=Estrangeiro)
+#   col2: NOME_SOCIO
+#   col3: CNPJ_CPF_SOCIO (masked: ***222333**)
+#   col4: QUALIFICACAO_SOCIO (numeric code)
+#   col5: DATA_ENTRADA (YYYYMMDD)
+#   col6: PAIS
+#   col7: REPRESENTANTE_LEGAL (CPF masked)
+#   col8: NOME_REPRESENTANTE
+#   col9: QUALIFICACAO_REPRESENTANTE
+#   col10: FAIXA_ETARIA
 #
 # Invariants:
-#   - cnpj_basico is preserved as the raw 8-digit root (not formatted) so the
-#     transform layer can JOIN it directly against empresas rows before the
-#     full CNPJ is known.
+#   - cnpj_basico is preserved as the raw 8-digit root (not formatted).
 #   - nome_socio is uppercased and stripped for consistent matching.
 from __future__ import annotations
 
@@ -25,53 +25,58 @@ from pathlib import Path
 
 import polars as pl
 
+_QSA_COLUMNS = [
+    "cnpj_basico",
+    "identificador_socio",
+    "nome_socio",
+    "cnpj_cpf_socio",
+    "qualificacao_socio",
+    "data_entrada",
+    "pais",
+    "representante_legal",
+    "nome_representante",
+    "qualificacao_representante",
+    "faixa_etaria",
+]
+
 
 def parse_qsa(raw_path: Path) -> pl.DataFrame:
-    """Parse QSA CSV into a sócios staging DataFrame.
-
-    The result carries cnpj_basico (raw, not formatted) as the join key to
-    dim_fornecedor, plus socio identity fields used to build dim_socio and
-    bridge_fornecedor_socio.
+    """Parse QSA CSV into a socios staging DataFrame.
 
     Args:
-        raw_path: Path to the raw QSA CSV file (Latin-1 encoding, semicolons).
+        raw_path: Path to the raw QSA CSV file (Latin-1 encoding, semicolons,
+                  no header, 11 columns).
 
     Returns:
-        Polars DataFrame with sócio records, one row per (empresa, sócio) pair.
+        Polars DataFrame with socio records, one row per (empresa, socio) pair.
     """
     raw = pl.read_csv(
         raw_path,
         separator=";",
         encoding="latin1",
+        has_header=False,
+        new_columns=_QSA_COLUMNS,
         infer_schema_length=0,
         null_values=["", "NULL"],
         truncate_ragged_lines=True,
     )
 
-    # Normalise column names.
-    raw = raw.rename({col: col.strip().upper() for col in raw.columns})
-
     n = len(raw)
 
-    def _safe_str(col: str) -> pl.Series:
-        if col in raw.columns:
-            return raw[col].str.strip_chars()
-        return pl.Series(col, [None] * n, dtype=pl.Utf8)
-
-    # DATA_ENTRADA: YYYYMMDD → Date (same format as empresas).
-    if "DATA_ENTRADA" in raw.columns:
-        data_entrada = (
-            raw["DATA_ENTRADA"].str.strip_chars().str.to_date(format="%Y%m%d", strict=False).alias("data_entrada")
-        )
-    else:
-        data_entrada = pl.Series("data_entrada", [None] * n, dtype=pl.Date)
+    # Parse DATA_ENTRADA from YYYYMMDD string to Date.
+    data_entrada = (
+        raw["data_entrada"]
+        .cast(pl.Utf8)
+        .str.strip_chars()
+        .str.to_date(format="%Y%m%d", strict=False)
+    )
 
     return pl.DataFrame(
         {
-            "cnpj_basico": _safe_str("CNPJ_BASICO").str.zfill(8),
-            "nome_socio": _safe_str("NOME_SOCIO").str.to_uppercase(),
-            "cpf_parcial": _safe_str("CNPJ_CPF_SOCIO"),
-            "qualificacao_socio": _safe_str("QUALIFICACAO_SOCIO"),
+            "cnpj_basico": raw["cnpj_basico"].cast(pl.Utf8).str.strip_chars().str.zfill(8),
+            "nome_socio": raw["nome_socio"].cast(pl.Utf8).str.strip_chars().str.to_uppercase(),
+            "cpf_parcial": raw["cnpj_cpf_socio"].cast(pl.Utf8).str.strip_chars(),
+            "qualificacao_socio": raw["qualificacao_socio"].cast(pl.Utf8).str.strip_chars(),
             "data_entrada": data_entrada,
             "percentual_capital": pl.Series("percentual_capital", [None] * n, dtype=pl.Float64),
         }

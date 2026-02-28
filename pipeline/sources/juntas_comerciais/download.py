@@ -67,20 +67,27 @@ def download_juntas_comerciais(url: str, raw_dir: Path, timeout: int = 300) -> P
         zip_name = zip_name + ".zip"
     zip_path = raw_dir / zip_name
 
-    with httpx.stream("GET", url, timeout=timeout, follow_redirects=True, headers=headers) as response:
-        response.raise_for_status()
-        downloaded = 0
-        with zip_path.open("wb") as file_handle:
-            for chunk in response.iter_bytes(chunk_size=8 * 1024 * 1024):
-                file_handle.write(chunk)
-                downloaded += len(chunk)
-                if downloaded % (50 * 1024 * 1024) < len(chunk):
-                    log(f"  {zip_name}: {downloaded // (1024 * 1024)} MB downloaded...")
+    if not zip_path.exists():
+        with httpx.stream("GET", url, timeout=timeout, follow_redirects=True, headers=headers) as response:
+            response.raise_for_status()
+            downloaded = 0
+            with zip_path.open("wb") as file_handle:
+                for chunk in response.iter_bytes(chunk_size=8 * 1024 * 1024):
+                    file_handle.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded % (50 * 1024 * 1024) < len(chunk):
+                        log(f"  {zip_name}: {downloaded // (1024 * 1024)} MB downloaded...")
+    else:
+        log(f"  {zip_name}: already exists, skipping download")
 
+    # ADR: Receita Federal uses non-standard names like "K3241...ESTABELE"
+    # (no .csv extension). Extract the first file found in the archive.
     with zipfile.ZipFile(zip_path) as archive:
-        csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
-        if not csv_names:
-            raise FileNotFoundError(f"No CSV found inside {zip_path}")
-        archive.extract(csv_names[0], raw_dir)
+        all_names = archive.namelist()
+        if not all_names:
+            raise FileNotFoundError(f"No files found inside {zip_path}")
+        csv_names = [n for n in all_names if n.lower().endswith(".csv") or "csv" in n.lower()]
+        target = csv_names[0] if csv_names else all_names[0]
+        archive.extract(target, raw_dir)
 
-    return raw_dir / csv_names[0]
+    return raw_dir / target

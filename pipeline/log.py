@@ -12,6 +12,10 @@ from __future__ import annotations
 import sys
 import time
 
+# Ensure UTF-8 output on Windows (CP1252 cannot encode some log characters).
+if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") != "utf8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
 _start = time.monotonic()
 
 
