@@ -12,38 +12,56 @@
 #   - Not unit-tested — requires network access.
 from __future__ import annotations
 
+import re
 import zipfile
-from datetime import date
 from pathlib import Path
 
 import httpx
 
 from pipeline.log import log
 
-_PORTAL_PREFIX = "portaldatransparencia.gov.br/download-de-dados/"
+# ADR: Portal da Transparência download URLs require a date suffix
+#
+# The base URL (e.g. .../download-de-dados/cepim) returns an HTML page.
+# The actual ZIP download requires appending the latest available date:
+#   .../download-de-dados/cepim/20260226  →  302 → S3 ZIP
+#
+# The available date is NOT today — it lags by 1-3 days. Each dataset
+# (CEIS, CNEP, CEPIM) may have a different latest date. We scrape the
+# available date from the HTML page's embedded JS `arquivos` array.
+
+_ARQUIVOS_RE = re.compile(
+    r'"ano"\s*:\s*"(\d{4})"\s*,\s*"mes"\s*:\s*"(\d{2})"\s*,\s*"dia"\s*:\s*"(\d{2})"'
+)
 
 
-def _resolve_portal_url(url: str) -> str:
-    """Append today's date (YYYYMMDD) to Portal da Transparência base URLs.
+def _scrape_latest_date(page_url: str, timeout: int) -> str:
+    """Scrape the latest available YYYYMMDD date from a Portal page.
 
-    The Portal requires a date suffix for direct ZIP downloads, e.g.
-    .../download-de-dados/cepim/20260228  →  302 → actual ZIP.
-    Without the date it returns an HTML landing page.
+    The page embeds a JS array like:
+        arquivos.push({"ano":"2026","mes":"02","dia":"26","origem":"CEPIM"});
+    We parse all entries and return the most recent date string.
     """
-    if _PORTAL_PREFIX not in url:
-        return url
-    stripped = url.rstrip("/")
-    last_segment = stripped.split("/")[-1]
-    if last_segment.isdigit() and len(last_segment) == 8:
-        return stripped
-    return f"{stripped}/{date.today().strftime('%Y%m%d')}"
+    resp = httpx.get(page_url, timeout=timeout, follow_redirects=True)
+    resp.raise_for_status()
+    matches = _ARQUIVOS_RE.findall(resp.text)
+    if not matches:
+        raise RuntimeError(
+            f"Could not find available dates on {page_url}. "
+            "The Portal da Transparência page format may have changed."
+        )
+    latest = max(matches)
+    return f"{latest[0]}{latest[1]}{latest[2]}"
 
 
 def _download_and_extract(url: str, raw_dir: Path, timeout: int) -> Path:
     """Download a ZIP file and extract its first CSV.
 
+    For Portal da Transparência URLs (no date suffix), the latest available
+    date is scraped from the page and appended automatically.
+
     Args:
-        url:     URL of the ZIP file (date suffix auto-appended for Portal URLs).
+        url:     Base URL of the dataset page (date suffix auto-resolved).
         raw_dir: Destination directory (created if absent).
         timeout: HTTP timeout in seconds.
 
@@ -52,8 +70,16 @@ def _download_and_extract(url: str, raw_dir: Path, timeout: int) -> Path:
     """
     raw_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved = _resolve_portal_url(url)
-    zip_name = url.rstrip("/").split("/")[-1] + ".zip"
+    stripped = url.rstrip("/")
+    last_segment = stripped.split("/")[-1]
+    if last_segment.isdigit() and len(last_segment) == 8:
+        resolved = stripped
+    else:
+        date_suffix = _scrape_latest_date(stripped, timeout)
+        resolved = f"{stripped}/{date_suffix}"
+        log(f"  Resolved {last_segment} → {date_suffix}")
+
+    zip_name = stripped.split("/")[-1] + ".zip"
     zip_path = raw_dir / zip_name
 
     with httpx.stream("GET", resolved, timeout=timeout, follow_redirects=True) as resp:

@@ -3,25 +3,55 @@
 # IO-only: download servidores CSV from Portal da Transparência.
 #
 # Design decisions:
-#   - Portal da Transparência provides servidores data as a ZIP. The extraction
-#     logic is identical to the sanções download helper.
+#   - Portal da Transparência provides servidores data as monthly ZIPs, with
+#     each "origem" (Servidores_SIAPE, Militares, etc.) as a separate file.
+#   - The download URL format is: .../servidores/YYYYMM_Origem
+#     (type ANO_MES_ORIGEM), unlike sanções which use YYYYMMDD.
+#   - We download only Servidores_SIAPE (federal civil servants from SIAPE),
+#     which is the origin the parse/match pipeline expects.
+#   - The latest available month is scraped from the page's JS `arquivos`
+#     array, filtered to Servidores_SIAPE entries.
 #   - Not unit-tested — requires network access.
 from __future__ import annotations
 
+import re
 import zipfile
 from pathlib import Path
 
 import httpx
 
 from pipeline.log import log
-from pipeline.sources.sancoes.download import _resolve_portal_url
+
+_ORIGEM = "Servidores_SIAPE"
+
+_ARQUIVOS_RE = re.compile(
+    r'"ano"\s*:\s*"(\d{4})"\s*,\s*"mes"\s*:\s*"(\d{2})"\s*,\s*"dia"\s*:\s*""\s*,'
+    r'\s*"origem"\s*:\s*"' + re.escape(_ORIGEM) + r'"'
+)
+
+
+def _scrape_latest_month(page_url: str, timeout: int) -> str:
+    """Scrape the latest available YYYYMM for Servidores_SIAPE."""
+    resp = httpx.get(page_url, timeout=timeout, follow_redirects=True)
+    resp.raise_for_status()
+    matches = _ARQUIVOS_RE.findall(resp.text)
+    if not matches:
+        raise RuntimeError(
+            f"Could not find {_ORIGEM} entries on {page_url}. "
+            "The Portal da Transparência page format may have changed."
+        )
+    latest = max(matches)
+    return f"{latest[0]}{latest[1]}"
 
 
 def download_servidores(url: str, raw_dir: Path, timeout: int = 300) -> Path:
     """Download and extract the servidores dataset.
 
+    Scrapes the latest available month from the Portal page and downloads
+    the Servidores_SIAPE ZIP.
+
     Args:
-        url:     URL of the servidores ZIP file (date suffix auto-appended).
+        url:     Base URL of the servidores download page.
         raw_dir: Destination directory (created if absent).
         timeout: HTTP timeout in seconds.
 
@@ -30,8 +60,12 @@ def download_servidores(url: str, raw_dir: Path, timeout: int = 300) -> Path:
     """
     raw_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved = _resolve_portal_url(url)
-    zip_name = url.rstrip("/").split("/")[-1] + ".zip"
+    stripped = url.rstrip("/")
+    yyyymm = _scrape_latest_month(stripped, timeout)
+    resolved = f"{stripped}/{yyyymm}_{_ORIGEM}"
+    log(f"  Resolved servidores → {yyyymm}_{_ORIGEM}")
+
+    zip_name = f"servidores_{yyyymm}.zip"
     zip_path = raw_dir / zip_name
 
     with httpx.stream("GET", resolved, timeout=timeout, follow_redirects=True) as resp:

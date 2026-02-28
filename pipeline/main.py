@@ -411,7 +411,7 @@ def _run_sources(config: PipelineConfig) -> None:
     }
 
     raw_paths: dict[str, Path] = {}
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with ThreadPoolExecutor(max_workers=len(download_tasks)) as pool:
         future_to_name: dict[Future[Path], str] = {
             pool.submit(fn, url, dest, timeout): name for name, (fn, url, dest, timeout) in download_tasks.items()
         }
