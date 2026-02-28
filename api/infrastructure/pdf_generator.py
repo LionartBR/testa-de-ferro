@@ -13,7 +13,7 @@ def gerar_pdf_ficha(ficha: FichaCompletaDTO) -> bytes:
     Raises RuntimeError if weasyprint is not installed.
     """
     try:
-        from weasyprint import HTML  # type: ignore[import-untyped]
+        from weasyprint import HTML  # type: ignore[import-untyped,import-not-found]
     except ImportError as err:
         msg = "PDF export requires weasyprint. Install with: pip install testa-de-ferro[pdf]"
         raise RuntimeError(msg) from err
