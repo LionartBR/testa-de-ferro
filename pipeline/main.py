@@ -465,11 +465,13 @@ def _run_sources(config: PipelineConfig) -> None:
         ),
         "sancoes": (
             lambda: validate_sancoes(
-                pl.concat([
-                    parse_ceis(raw_paths["ceis"]),
-                    parse_cnep(raw_paths["cnep"]),
-                    parse_cepim(raw_paths["cepim"]),
-                ])
+                pl.concat(
+                    [
+                        parse_ceis(raw_paths["ceis"]),
+                        parse_cnep(raw_paths["cnep"]),
+                        parse_cepim(raw_paths["cepim"]),
+                    ]
+                )
             ),
             staging_dir / "sancoes.parquet",
         ),
@@ -497,8 +499,7 @@ def _run_sources(config: PipelineConfig) -> None:
 
     with ThreadPoolExecutor(max_workers=len(parse_tasks)) as pool:
         parse_futures: dict[Future[int], str] = {
-            pool.submit(_parse_and_write, fn, path): name
-            for name, (fn, path) in parse_tasks.items()
+            pool.submit(_parse_and_write, fn, path): name for name, (fn, path) in parse_tasks.items()
         }
         for parse_future in as_completed(parse_futures):
             name = parse_futures[parse_future]

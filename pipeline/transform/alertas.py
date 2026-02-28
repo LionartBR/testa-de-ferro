@@ -176,9 +176,7 @@ def _socio_servidor_publico_batch(
 
     # Build descricao: "Socio {nome} e servidor publico" optionally appended
     # with " ({orgao})" when orgao_lotacao is not null.
-    descricao_expr = pl.concat_str(
-        [pl.lit("Socio "), pl.col("nome_socio"), pl.lit(" e servidor publico")]
-    )
+    descricao_expr = pl.concat_str([pl.lit("Socio "), pl.col("nome_socio"), pl.lit(" e servidor publico")])
     if has_orgao:
         # ADR: when orgao_lotacao is present and non-null, append " ({orgao})".
         # pl.when produces a branch that is null when the condition is false, so
@@ -354,9 +352,7 @@ def _doacao_para_contratante_batch(
     # used only for the descricao column to preserve the exact output value.
     # All other columns are fully vectorised.
     result_df = both.with_columns(
-        pl.col("valor_total_contratos")
-        .map_elements(lambda v: f"{v:,.2f}", return_dtype=pl.Utf8)
-        .alias("valor_fmt")
+        pl.col("valor_total_contratos").map_elements(lambda v: f"{v:,.2f}", return_dtype=pl.Utf8).alias("valor_fmt")
     ).select(
         pl.col("fk_fornecedor"),
         pl.lit(None).cast(pl.Int64).alias("fk_socio"),
@@ -430,9 +426,9 @@ def _socio_sancionado_em_outra_batch(
         pl.lit(None).cast(pl.Int64).alias("fk_socio"),
         pl.lit(_SOCIO_SANCIONADO_EM_OUTRA).alias("tipo_alerta"),
         pl.lit(_GRAVE).alias("severidade"),
-        pl.concat_str(
-            [pl.lit("Socio "), pl.col("nome_socio"), pl.lit(" e socio de outra empresa sancionada")]
-        ).alias("descricao"),
+        pl.concat_str([pl.lit("Socio "), pl.col("nome_socio"), pl.lit(" e socio de outra empresa sancionada")]).alias(
+            "descricao"
+        ),
         base_evidencia_expr.alias("evidencia"),
         pl.lit(detectado_em).alias("detectado_em"),
     ]
@@ -579,9 +575,9 @@ def _rodizio_licitacao_batch(
         pl.lit(_RODIZIO_LICITACAO).alias("tipo_alerta"),
         pl.lit(_GRAVISSIMO).alias("severidade"),
         pl.lit("Empresa participa de licitacoes com outra empresa que compartilha socios").alias("descricao"),
-        pl.concat_str(
-            [pl.lit("max_licitacoes_comuns_com_par="), pl.col("max_licitacoes_comuns").cast(pl.Utf8)]
-        ).alias("evidencia"),
+        pl.concat_str([pl.lit("max_licitacoes_comuns_com_par="), pl.col("max_licitacoes_comuns").cast(pl.Utf8)]).alias(
+            "evidencia"
+        ),
         pl.lit(detectado_em).alias("detectado_em"),
     )
     return result_df.to_dicts()

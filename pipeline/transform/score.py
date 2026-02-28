@@ -577,18 +577,26 @@ def _mesmo_endereco_batch(
     pk_map = empresas_df.select(["cnpj", "pk_fornecedor"])
 
     # Side A: cnpj_a is the flagged supplier, cnpj_b is the partner.
-    side_a = pairs.select(
-        pl.col("cnpj_a").alias("cnpj"),
-        pl.col("cnpj_b").alias("cnpj_parceiro"),
-        pl.col("endereco_compartilhado"),
-    ).join(pk_map, on="cnpj", how="inner").rename({"pk_fornecedor": "fk_fornecedor"})
+    side_a = (
+        pairs.select(
+            pl.col("cnpj_a").alias("cnpj"),
+            pl.col("cnpj_b").alias("cnpj_parceiro"),
+            pl.col("endereco_compartilhado"),
+        )
+        .join(pk_map, on="cnpj", how="inner")
+        .rename({"pk_fornecedor": "fk_fornecedor"})
+    )
 
     # Side B: cnpj_b is the flagged supplier, cnpj_a is the partner.
-    side_b = pairs.select(
-        pl.col("cnpj_b").alias("cnpj"),
-        pl.col("cnpj_a").alias("cnpj_parceiro"),
-        pl.col("endereco_compartilhado"),
-    ).join(pk_map, on="cnpj", how="inner").rename({"pk_fornecedor": "fk_fornecedor"})
+    side_b = (
+        pairs.select(
+            pl.col("cnpj_b").alias("cnpj"),
+            pl.col("cnpj_a").alias("cnpj_parceiro"),
+            pl.col("endereco_compartilhado"),
+        )
+        .join(pk_map, on="cnpj", how="inner")
+        .rename({"pk_fornecedor": "fk_fornecedor"})
+    )
 
     flagged = pl.concat([side_a, side_b]).unique(subset=["fk_fornecedor"], keep="first")
 
@@ -669,9 +677,7 @@ def _crescimento_subito_batch(
     if dedup.is_empty():
         return []
 
-    result_df = dedup.with_columns(
-        (pl.col("valor_anual") / pl.col("valor_prev")).alias("razao")
-    ).select(
+    result_df = dedup.with_columns((pl.col("valor_anual") / pl.col("valor_prev")).alias("razao")).select(
         pl.col("fk_fornecedor"),
         pl.lit("CRESCIMENTO_SUBITO").alias("indicador"),
         pl.lit(_PESO_CRESCIMENTO_SUBITO).alias("peso"),
