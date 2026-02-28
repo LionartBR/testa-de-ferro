@@ -133,6 +133,3 @@ def _fetch_window(
         page += 1
 
     return records
-
-
-
