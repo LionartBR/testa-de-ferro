@@ -13,18 +13,37 @@
 from __future__ import annotations
 
 import zipfile
+from datetime import date
 from pathlib import Path
 
 import httpx
 
 from pipeline.log import log
 
+_PORTAL_PREFIX = "portaldatransparencia.gov.br/download-de-dados/"
+
+
+def _resolve_portal_url(url: str) -> str:
+    """Append today's date (YYYYMMDD) to Portal da Transparência base URLs.
+
+    The Portal requires a date suffix for direct ZIP downloads, e.g.
+    .../download-de-dados/cepim/20260228  →  302 → actual ZIP.
+    Without the date it returns an HTML landing page.
+    """
+    if _PORTAL_PREFIX not in url:
+        return url
+    stripped = url.rstrip("/")
+    last_segment = stripped.split("/")[-1]
+    if last_segment.isdigit() and len(last_segment) == 8:
+        return stripped
+    return f"{stripped}/{date.today().strftime('%Y%m%d')}"
+
 
 def _download_and_extract(url: str, raw_dir: Path, timeout: int) -> Path:
     """Download a ZIP file and extract its first CSV.
 
     Args:
-        url:     URL of the ZIP file.
+        url:     URL of the ZIP file (date suffix auto-appended for Portal URLs).
         raw_dir: Destination directory (created if absent).
         timeout: HTTP timeout in seconds.
 
@@ -33,10 +52,11 @@ def _download_and_extract(url: str, raw_dir: Path, timeout: int) -> Path:
     """
     raw_dir.mkdir(parents=True, exist_ok=True)
 
+    resolved = _resolve_portal_url(url)
     zip_name = url.rstrip("/").split("/")[-1] + ".zip"
     zip_path = raw_dir / zip_name
 
-    with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:
+    with httpx.stream("GET", resolved, timeout=timeout, follow_redirects=True) as resp:
         resp.raise_for_status()
         downloaded = 0
         with zip_path.open("wb") as fh:

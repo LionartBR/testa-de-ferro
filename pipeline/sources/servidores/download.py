@@ -14,13 +14,14 @@ from pathlib import Path
 import httpx
 
 from pipeline.log import log
+from pipeline.sources.sancoes.download import _resolve_portal_url
 
 
 def download_servidores(url: str, raw_dir: Path, timeout: int = 300) -> Path:
     """Download and extract the servidores dataset.
 
     Args:
-        url:     URL of the servidores ZIP file.
+        url:     URL of the servidores ZIP file (date suffix auto-appended).
         raw_dir: Destination directory (created if absent).
         timeout: HTTP timeout in seconds.
 
@@ -29,10 +30,11 @@ def download_servidores(url: str, raw_dir: Path, timeout: int = 300) -> Path:
     """
     raw_dir.mkdir(parents=True, exist_ok=True)
 
+    resolved = _resolve_portal_url(url)
     zip_name = url.rstrip("/").split("/")[-1] + ".zip"
     zip_path = raw_dir / zip_name
 
-    with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:
+    with httpx.stream("GET", resolved, timeout=timeout, follow_redirects=True) as resp:
         resp.raise_for_status()
         downloaded = 0
         with zip_path.open("wb") as fh:
