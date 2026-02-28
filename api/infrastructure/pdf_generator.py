@@ -34,8 +34,12 @@ def _build_html(ficha: FichaCompletaDTO) -> str:
     # Dados cadastrais
     endereco_str = ""
     if ficha.endereco:
-        parts = [ficha.endereco.get("logradouro", ""), ficha.endereco.get("municipio", ""),
-                 ficha.endereco.get("uf", ""), ficha.endereco.get("cep", "")]
+        parts = [
+            ficha.endereco.get("logradouro", ""),
+            ficha.endereco.get("municipio", ""),
+            ficha.endereco.get("uf", ""),
+            ficha.endereco.get("cep", ""),
+        ]
         endereco_str = ", ".join(p for p in parts if p)
 
     sections.append(f"""
@@ -44,10 +48,10 @@ def _build_html(ficha: FichaCompletaDTO) -> str:
         <tr><td class="label">CNPJ</td><td>{ficha.cnpj}</td></tr>
         <tr><td class="label">Razao Social</td><td>{ficha.razao_social}</td></tr>
         <tr><td class="label">Situacao</td><td>{ficha.situacao}</td></tr>
-        <tr><td class="label">Data Abertura</td><td>{ficha.data_abertura or '-'}</td></tr>
-        <tr><td class="label">Capital Social</td><td>R$ {ficha.capital_social or '-'}</td></tr>
-        <tr><td class="label">CNAE</td><td>{ficha.cnae_principal or '-'} {ficha.cnae_descricao or ''}</td></tr>
-        <tr><td class="label">Endereco</td><td>{endereco_str or '-'}</td></tr>
+        <tr><td class="label">Data Abertura</td><td>{ficha.data_abertura or "-"}</td></tr>
+        <tr><td class="label">Capital Social</td><td>R$ {ficha.capital_social or "-"}</td></tr>
+        <tr><td class="label">CNAE</td><td>{ficha.cnae_principal or "-"} {ficha.cnae_descricao or ""}</td></tr>
+        <tr><td class="label">Endereco</td><td>{endereco_str or "-"}</td></tr>
         <tr><td class="label">Total Contratos</td><td>{ficha.total_contratos}</td></tr>
         <tr><td class="label">Valor Total</td><td>R$ {ficha.valor_total_contratos}</td></tr>
     </table>
@@ -56,8 +60,7 @@ def _build_html(ficha: FichaCompletaDTO) -> str:
     # Score
     if ficha.score:
         ind_rows = "".join(
-            f"<tr><td>{i.tipo}</td><td>{i.peso}</td><td>{i.descricao}</td></tr>"
-            for i in ficha.score.indicadores
+            f"<tr><td>{i.tipo}</td><td>{i.peso}</td><td>{i.descricao}</td></tr>" for i in ficha.score.indicadores
         )
         sections.append(f"""
         <h2>Score de Risco</h2>
@@ -71,8 +74,7 @@ def _build_html(ficha: FichaCompletaDTO) -> str:
     # Alertas
     if ficha.alertas_criticos:
         alerta_rows = "".join(
-            f"<tr><td>{a.tipo}</td><td>{a.severidade}</td><td>{a.descricao}</td></tr>"
-            for a in ficha.alertas_criticos
+            f"<tr><td>{a.tipo}</td><td>{a.severidade}</td><td>{a.descricao}</td></tr>" for a in ficha.alertas_criticos
         )
         sections.append(f"""
         <h2>Alertas Criticos</h2>

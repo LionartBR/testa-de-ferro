@@ -53,14 +53,10 @@ def validar_completude(staging_dir: Path) -> None:
         path = staging_dir / f"{source}.parquet"
 
         if not path.exists():
-            raise CompletudeError(
-                f"Missing staging file: {source}.parquet "
-                f"(expected at {path})"
-            )
+            raise CompletudeError(f"Missing staging file: {source}.parquet (expected at {path})")
 
         df = pl.read_parquet(path)
         if df.height == 0:
             raise CompletudeError(
-                f"Empty staging file: {source}.parquet (0 rows). "
-                "Re-run the corresponding source pipeline."
+                f"Empty staging file: {source}.parquet (0 rows). Re-run the corresponding source pipeline."
             )

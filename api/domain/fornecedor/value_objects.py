@@ -24,6 +24,7 @@ def _verificar_cnpj(digitos: str) -> bool:
 @dataclass(frozen=True)
 class CNPJ:
     """Value Object imutavel para CNPJ. Valida digitos verificadores no construtor."""
+
     _valor: str  # sempre 14 digitos sem formatacao
 
     def __init__(self, raw: str) -> None:
@@ -65,6 +66,7 @@ class CNPJ:
 @dataclass(frozen=True)
 class RazaoSocial:
     """Razao social nao-vazia, trimada."""
+
     valor: str
 
     def __post_init__(self) -> None:
@@ -77,6 +79,7 @@ class RazaoSocial:
 @dataclass(frozen=True)
 class CapitalSocial:
     """Valor monetario em Decimal. Nunca negativo. Nunca float."""
+
     valor: Decimal
 
     def __post_init__(self) -> None:
@@ -87,6 +90,7 @@ class CapitalSocial:
 @dataclass(frozen=True)
 class Endereco:
     """Endereco sem complemento (ver ADR MESMO_ENDERECO no CLAUDE.md)."""
+
     logradouro: str
     municipio: str
     uf: str

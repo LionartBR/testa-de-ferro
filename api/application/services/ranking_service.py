@@ -21,7 +21,8 @@ class RankingService:
                 faixa_risco=f.score_risco.faixa.value if f.score_risco else "Baixo",
                 qtd_alertas=len(f.alertas_criticos),
                 max_severidade=max(
-                    (a.severidade.value for a in f.alertas_criticos), default=None,
+                    (a.severidade.value for a in f.alertas_criticos),
+                    default=None,
                 ),
                 total_contratos=f.total_contratos,
                 valor_total=str(f.valor_total_contratos),

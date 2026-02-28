@@ -11,7 +11,8 @@ class DuckDBAlertaRepo:
     def listar_feed(self, limit: int, offset: int) -> list[dict[str, object]]:
         """JOIN fato_alerta_critico + dim_fornecedor + dim_socio
         ORDER BY detectado_em DESC."""
-        rows = self._conn.execute("""
+        rows = self._conn.execute(
+            """
             SELECT fac.tipo_alerta, fac.severidade, fac.descricao,
                    fac.evidencia, fac.detectado_em,
                    df.cnpj, df.razao_social,
@@ -21,12 +22,15 @@ class DuckDBAlertaRepo:
             LEFT JOIN dim_socio ds ON fac.fk_socio = ds.pk_socio
             ORDER BY fac.detectado_em DESC
             LIMIT ? OFFSET ?
-        """, [limit, offset]).fetchall()
+        """,
+            [limit, offset],
+        ).fetchall()
         return [self._to_dict(r) for r in rows]
 
     def listar_por_tipo(self, tipo: str, limit: int, offset: int) -> list[dict[str, object]]:
         """WHERE tipo_alerta = ? ORDER BY detectado_em DESC."""
-        rows = self._conn.execute("""
+        rows = self._conn.execute(
+            """
             SELECT fac.tipo_alerta, fac.severidade, fac.descricao,
                    fac.evidencia, fac.detectado_em,
                    df.cnpj, df.razao_social,
@@ -37,7 +41,9 @@ class DuckDBAlertaRepo:
             WHERE fac.tipo_alerta = ?
             ORDER BY fac.detectado_em DESC
             LIMIT ? OFFSET ?
-        """, [tipo, limit, offset]).fetchall()
+        """,
+            [tipo, limit, offset],
+        ).fetchall()
         return [self._to_dict(r) for r in rows]
 
     def contar(self) -> int:

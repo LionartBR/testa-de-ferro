@@ -65,7 +65,9 @@ class FichaCompletaDTO(BaseModel):
                 "municipio": fornecedor.endereco.municipio,
                 "uf": fornecedor.endereco.uf,
                 "cep": fornecedor.endereco.cep,
-            } if fornecedor.endereco else None,
+            }
+            if fornecedor.endereco
+            else None,
             total_contratos=fornecedor.total_contratos,
             valor_total_contratos=str(fornecedor.valor_total_contratos),
             alertas_criticos=[

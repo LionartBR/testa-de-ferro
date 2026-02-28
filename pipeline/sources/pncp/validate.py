@@ -47,17 +47,11 @@ def validate_contratos(df: pl.DataFrame) -> pl.DataFrame:
 
     # Step 2: require positive valor.
     if "valor" in df.columns:
-        df = df.filter(
-            pl.col("valor").is_not_null() & (pl.col("valor") > 0)
-        )
+        df = df.filter(pl.col("valor").is_not_null() & (pl.col("valor") > 0))
 
     # Step 3: truncate objeto to max length.
     if "objeto" in df.columns:
-        df = df.with_columns(
-            pl.col("objeto")
-            .str.slice(0, _OBJETO_MAX_LEN)
-            .alias("objeto")
-        )
+        df = df.with_columns(pl.col("objeto").str.slice(0, _OBJETO_MAX_LEN).alias("objeto"))
 
     # Step 4: deduplicate by num_licitacao.
     if "num_licitacao" in df.columns:
@@ -65,8 +59,6 @@ def validate_contratos(df: pl.DataFrame) -> pl.DataFrame:
 
     # Step 5: re-assign pk_contrato.
     n = len(df)
-    df = df.with_columns(
-        pl.Series("pk_contrato", list(range(1, n + 1)))
-    )
+    df = df.with_columns(pl.Series("pk_contrato", list(range(1, n + 1))))
 
     return df

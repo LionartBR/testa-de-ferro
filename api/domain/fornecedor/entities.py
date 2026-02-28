@@ -14,6 +14,7 @@ from .value_objects import CNPJ, CapitalSocial, Endereco, RazaoSocial
 @dataclass(frozen=True)
 class AlertaCritico:
     """Alerta binario. Se a condicao e detectada, o alerta existe. Independe do score."""
+
     id: uuid.UUID
     tipo: TipoAlerta
     severidade: Severidade
@@ -31,6 +32,7 @@ class AlertaCritico:
 class Fornecedor:
     """Aggregate Root. Imutavel — alertas e score sao computados externamente
     por funcoes puras e passados na construcao (Functional Core pattern)."""
+
     cnpj: CNPJ
     razao_social: RazaoSocial
     situacao: SituacaoCadastral

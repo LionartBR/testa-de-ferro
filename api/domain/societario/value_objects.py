@@ -23,6 +23,7 @@ def _verificar_cpf(digitos: str) -> bool:
 @dataclass(frozen=True)
 class CPF:
     """Value Object imutavel para CPF. NUNCA expoe valor completo em repr/str (LGPD)."""
+
     _valor: str  # sempre 11 digitos
 
     def __init__(self, raw: str) -> None:
@@ -64,6 +65,7 @@ class CPF:
 @dataclass(frozen=True)
 class CPFMascarado:
     """CPF parcialmente mascarado do Portal da Transparencia: ***.XXX.XXX-**"""
+
     _raw: str
     _digitos_visiveis: str
 
@@ -84,4 +86,5 @@ class CPFMascarado:
 @dataclass(frozen=True)
 class QualificacaoSocio:
     """Qualificacao do socio (ex: Socio-Administrador, Socio, etc.)"""
+
     valor: str

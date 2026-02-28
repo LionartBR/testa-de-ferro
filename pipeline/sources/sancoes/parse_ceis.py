@@ -57,11 +57,7 @@ def parse_ceis(raw_path: Path) -> pl.DataFrame:
     def _parse_date(col: str) -> pl.Series:
         """Parse ISO-8601 date column (YYYY-MM-DD). Returns Date or null."""
         if col in raw.columns:
-            return (
-                raw[col]
-                .str.strip_chars()
-                .str.to_date(format="%Y-%m-%d", strict=False)
-            )
+            return raw[col].str.strip_chars().str.to_date(format="%Y-%m-%d", strict=False)
         return pl.Series(col, [None] * n, dtype=pl.Date)
 
     return pl.DataFrame(

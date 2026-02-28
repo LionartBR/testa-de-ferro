@@ -102,8 +102,6 @@ def parse_servidores(raw_path: Path) -> pl.DataFrame:
             "digitos_visiveis": digitos_visiveis,
             "cargo": _safe_str("CARGO_DESCRICAO").alias("cargo"),
             "orgao_lotacao": _safe_str("ORGAO_LOTACAO").alias("orgao_lotacao"),
-            "is_servidor_publico": pl.Series(
-                "is_servidor_publico", [True] * n, dtype=pl.Boolean
-            ),
+            "is_servidor_publico": pl.Series("is_servidor_publico", [True] * n, dtype=pl.Boolean),
         }
     )

@@ -92,8 +92,16 @@ def test_parse_empresas_data_abertura_como_date() -> None:
 def test_parse_empresas_retorna_colunas_obrigatorias() -> None:
     """parse_empresas returns all required dim_fornecedor staging columns."""
     df = parse_empresas(SAMPLE_CNPJ)
-    required = {"pk_fornecedor", "cnpj", "razao_social", "data_abertura",
-                "capital_social", "cnae_principal", "cnae_descricao", "situacao"}
+    required = {
+        "pk_fornecedor",
+        "cnpj",
+        "razao_social",
+        "data_abertura",
+        "capital_social",
+        "cnae_principal",
+        "cnae_descricao",
+        "situacao",
+    }
     assert required.issubset(set(df.columns))
 
 
@@ -123,20 +131,22 @@ def test_parse_qsa_cpf_parcial_preservado() -> None:
 
 def test_validate_empresas_remove_duplicatas() -> None:
     """Dedup by cnpj keeps only the first occurrence."""
-    df = pl.DataFrame({
-        "pk_fornecedor": [1, 2],
-        "cnpj": ["11.222.333/0001-81", "11.222.333/0001-81"],
-        "razao_social": ["EMPRESA A", "EMPRESA A DUPLICADA"],
-        "data_abertura": pl.Series([None, None], dtype=pl.Date),
-        "capital_social": [1000.0, 2000.0],
-        "cnae_principal": [None, None],
-        "cnae_descricao": [None, None],
-        "logradouro": [None, None],
-        "municipio": [None, None],
-        "uf": [None, None],
-        "cep": [None, None],
-        "situacao": ["ATIVA", "ATIVA"],
-    })
+    df = pl.DataFrame(
+        {
+            "pk_fornecedor": [1, 2],
+            "cnpj": ["11.222.333/0001-81", "11.222.333/0001-81"],
+            "razao_social": ["EMPRESA A", "EMPRESA A DUPLICADA"],
+            "data_abertura": pl.Series([None, None], dtype=pl.Date),
+            "capital_social": [1000.0, 2000.0],
+            "cnae_principal": [None, None],
+            "cnae_descricao": [None, None],
+            "logradouro": [None, None],
+            "municipio": [None, None],
+            "uf": [None, None],
+            "cep": [None, None],
+            "situacao": ["ATIVA", "ATIVA"],
+        }
+    )
     result = validate_empresas(df)
     assert len(result) == 1
     assert result["razao_social"][0] == "EMPRESA A"
@@ -144,20 +154,22 @@ def test_validate_empresas_remove_duplicatas() -> None:
 
 def test_validate_empresas_rejeita_cnpj_invalido() -> None:
     """Rows with malformed CNPJ format are dropped."""
-    df = pl.DataFrame({
-        "pk_fornecedor": [1, 2],
-        "cnpj": ["INVALIDO", "11.222.333/0001-81"],
-        "razao_social": ["EMPRESA X", "EMPRESA Y"],
-        "data_abertura": pl.Series([None, None], dtype=pl.Date),
-        "capital_social": [None, None],
-        "cnae_principal": [None, None],
-        "cnae_descricao": [None, None],
-        "logradouro": [None, None],
-        "municipio": [None, None],
-        "uf": [None, None],
-        "cep": [None, None],
-        "situacao": [None, None],
-    })
+    df = pl.DataFrame(
+        {
+            "pk_fornecedor": [1, 2],
+            "cnpj": ["INVALIDO", "11.222.333/0001-81"],
+            "razao_social": ["EMPRESA X", "EMPRESA Y"],
+            "data_abertura": pl.Series([None, None], dtype=pl.Date),
+            "capital_social": [None, None],
+            "cnae_principal": [None, None],
+            "cnae_descricao": [None, None],
+            "logradouro": [None, None],
+            "municipio": [None, None],
+            "uf": [None, None],
+            "cep": [None, None],
+            "situacao": [None, None],
+        }
+    )
     result = validate_empresas(df)
     assert len(result) == 1
     assert result["cnpj"][0] == "11.222.333/0001-81"
@@ -165,14 +177,16 @@ def test_validate_empresas_rejeita_cnpj_invalido() -> None:
 
 def test_validate_qsa_remove_duplicatas() -> None:
     """Dedup by (cnpj_basico, cpf_parcial) keeps first occurrence."""
-    df = pl.DataFrame({
-        "cnpj_basico": ["11222333", "11222333"],
-        "nome_socio": ["JOAO SILVA", "JOAO SILVA DUPLICADO"],
-        "cpf_parcial": ["***222333**", "***222333**"],
-        "qualificacao_socio": ["49", "49"],
-        "data_entrada": pl.Series([None, None], dtype=pl.Date),
-        "percentual_capital": [None, None],
-    })
+    df = pl.DataFrame(
+        {
+            "cnpj_basico": ["11222333", "11222333"],
+            "nome_socio": ["JOAO SILVA", "JOAO SILVA DUPLICADO"],
+            "cpf_parcial": ["***222333**", "***222333**"],
+            "qualificacao_socio": ["49", "49"],
+            "data_entrada": pl.Series([None, None], dtype=pl.Date),
+            "percentual_capital": [None, None],
+        }
+    )
     result = validate_qsa(df)
     assert len(result) == 1
     assert result["nome_socio"][0] == "JOAO SILVA"
@@ -180,14 +194,16 @@ def test_validate_qsa_remove_duplicatas() -> None:
 
 def test_validate_qsa_rejeita_sem_nome() -> None:
     """Rows without nome_socio are dropped."""
-    df = pl.DataFrame({
-        "cnpj_basico": ["11222333", "22333444"],
-        "nome_socio": [None, "MARIA COSTA"],
-        "cpf_parcial": ["***111222**", "***333444**"],
-        "qualificacao_socio": ["49", "49"],
-        "data_entrada": pl.Series([None, None], dtype=pl.Date),
-        "percentual_capital": [None, None],
-    })
+    df = pl.DataFrame(
+        {
+            "cnpj_basico": ["11222333", "22333444"],
+            "nome_socio": [None, "MARIA COSTA"],
+            "cpf_parcial": ["***111222**", "***333444**"],
+            "qualificacao_socio": ["49", "49"],
+            "data_entrada": pl.Series([None, None], dtype=pl.Date),
+            "percentual_capital": [None, None],
+        }
+    )
     result = validate_qsa(df)
     assert len(result) == 1
     assert result["nome_socio"][0] == "MARIA COSTA"

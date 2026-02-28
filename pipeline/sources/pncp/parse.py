@@ -120,16 +120,11 @@ def parse_contratos(raw_path: Path) -> pl.DataFrame:
     for date_col in ("data_assinatura", "data_vigencia"):
         if date_col in df.columns and df[date_col].dtype == pl.Utf8:
             df = df.with_columns(
-                pl.col(date_col)
-                .str.strip_chars()
-                .str.to_date(format="%Y-%m-%d", strict=False)
-                .alias(date_col)
+                pl.col(date_col).str.strip_chars().str.to_date(format="%Y-%m-%d", strict=False).alias(date_col)
             )
 
     # Ensure valor is Float64.
     if "valor" in df.columns:
-        df = df.with_columns(
-            pl.col("valor").cast(pl.Float64, strict=False)
-        )
+        df = df.with_columns(pl.col("valor").cast(pl.Float64, strict=False))
 
     return df

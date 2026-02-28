@@ -44,7 +44,7 @@ def export_ficha(
         from api.infrastructure.pdf_generator import gerar_pdf_ficha
 
         pdf_bytes = gerar_pdf_ficha(ficha)
-    except RuntimeError as err:
+    except (RuntimeError, OSError) as err:
         raise HTTPException(status_code=501, detail=str(err)) from err
     return Response(
         content=pdf_bytes,

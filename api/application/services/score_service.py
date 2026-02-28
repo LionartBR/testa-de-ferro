@@ -4,6 +4,7 @@
 ADR: Score e Alertas sao dimensoes INDEPENDENTES.
 Este modulo NUNCA deve importar o servico de alertas.
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -82,9 +83,8 @@ def _avaliar_capital_social_baixo(
         tipo=TipoIndicador.CAPITAL_SOCIAL_BAIXO,
         peso=PESOS[TipoIndicador.CAPITAL_SOCIAL_BAIXO],
         descricao=f"Capital social R${fornecedor.capital_social.valor:,.2f} "
-                  f"desproporcional a contratos R${valor_total:,.2f}",
-        evidencia=f"capital={fornecedor.capital_social.valor}, "
-                  f"valor_total_contratos={valor_total}",
+        f"desproporcional a contratos R${valor_total:,.2f}",
+        evidencia=f"capital={fornecedor.capital_social.valor}, valor_total_contratos={valor_total}",
     )
 
 
@@ -111,11 +111,11 @@ def _avaliar_empresa_recente(
         tipo=TipoIndicador.EMPRESA_RECENTE,
         peso=PESOS[TipoIndicador.EMPRESA_RECENTE],
         descricao=f"Empresa aberta em {fornecedor.data_abertura} obteve "
-                  f"primeiro contrato em {primeiro_contrato} "
-                  f"({dias_ate_contrato} dias depois)",
+        f"primeiro contrato em {primeiro_contrato} "
+        f"({dias_ate_contrato} dias depois)",
         evidencia=f"data_abertura={fornecedor.data_abertura}, "
-                  f"primeiro_contrato={primeiro_contrato}, "
-                  f"dias={dias_ate_contrato}",
+        f"primeiro_contrato={primeiro_contrato}, "
+        f"dias={dias_ate_contrato}",
     )
 
 

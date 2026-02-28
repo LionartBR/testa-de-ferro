@@ -36,14 +36,9 @@ def validate_servidores(df: pl.DataFrame) -> pl.DataFrame:
         Cleaned DataFrame. nome is guaranteed non-null.
     """
     # Step 1: require nome.
-    df = df.filter(
-        pl.col("nome").is_not_null()
-        & (pl.col("nome").str.strip_chars() != "")
-    )
+    df = df.filter(pl.col("nome").is_not_null() & (pl.col("nome").str.strip_chars() != ""))
 
     # Step 2: deduplicate by (nome, digitos_visiveis).
-    df = df.unique(
-        subset=["nome", "digitos_visiveis"], keep="first", maintain_order=True
-    )
+    df = df.unique(subset=["nome", "digitos_visiveis"], keep="first", maintain_order=True)
 
     return df

@@ -88,26 +88,23 @@ def enriquecer_socios(
     # Extract the 8-digit CNPJ root from the sancoes table so we can join
     # against the QSA cnpj_basico.
     if "cnpj_basico" in sancoes_df.columns:
-        sancionados_basico = sancoes_df.select(
-            pl.col("cnpj_basico").alias("_cnpj_basico_sancionado")
-        ).unique()
+        sancionados_basico = sancoes_df.select(pl.col("cnpj_basico").alias("_cnpj_basico_sancionado")).unique()
     else:
         # Fall back: derive basico from formatted CNPJ by stripping punctuation.
         sancionados_basico = sancoes_df.select(
-            pl.col("cnpj")
-            .str.replace_all(r"[.\-/]", "")
-            .str.slice(0, 8)
-            .alias("_cnpj_basico_sancionado")
+            pl.col("cnpj").str.replace_all(r"[.\-/]", "").str.slice(0, 8).alias("_cnpj_basico_sancionado")
         ).unique()
 
-    cnpjs_sancionados: set[str] = set(
-        sancionados_basico["_cnpj_basico_sancionado"].drop_nulls().to_list()
-    )
+    cnpjs_sancionados: set[str] = set(sancionados_basico["_cnpj_basico_sancionado"].drop_nulls().to_list())
 
-    is_sancionado_series = socios_df["cnpj_basico"].map_elements(
-        lambda v: v in cnpjs_sancionados if v is not None else False,
-        return_dtype=pl.Boolean,
-    ).alias("is_sancionado")
+    is_sancionado_series = (
+        socios_df["cnpj_basico"]
+        .map_elements(
+            lambda v: v in cnpjs_sancionados if v is not None else False,
+            return_dtype=pl.Boolean,
+        )
+        .alias("is_sancionado")
+    )
 
     # ------------------------------------------------------------------
     # qtd_empresas_governo: count of distinct CNPJs per sócio by name
@@ -120,24 +117,17 @@ def enriquecer_socios(
     empresas_set: set[str] = set(empresas_cnpj_basico)
 
     # Filter socios to those that belong to known government-supplier companies.
-    socios_in_gov = socios_df.filter(
-        socios_df["cnpj_basico"].is_in(list(empresas_set))
-    )
+    socios_in_gov = socios_df.filter(socios_df["cnpj_basico"].is_in(list(empresas_set)))
 
     # Count how many distinct cnpj_basico each nome_socio appears in.
-    nome_count = (
-        socios_in_gov
-        .group_by("nome_socio")
-        .agg(pl.col("cnpj_basico").n_unique().alias("_qtd_empresas_governo"))
+    nome_count = socios_in_gov.group_by("nome_socio").agg(
+        pl.col("cnpj_basico").n_unique().alias("_qtd_empresas_governo")
     )
 
     enriched = (
-        socios_df
-        .with_columns(is_sancionado_series)
+        socios_df.with_columns(is_sancionado_series)
         .join(nome_count, on="nome_socio", how="left")
-        .with_columns(
-            pl.col("_qtd_empresas_governo").fill_null(0).alias("qtd_empresas_governo")
-        )
+        .with_columns(pl.col("_qtd_empresas_governo").fill_null(0).alias("qtd_empresas_governo"))
         .drop("_qtd_empresas_governo")
     )
 
@@ -173,15 +163,23 @@ def detectar_mesmo_endereco(
     if missing:
         raise ValueError(f"empresas_df is missing columns: {missing}")
 
-    with_key = empresas_df.select([
-        pl.col("cnpj"),
-        pl.col("logradouro"),
-    ]).with_columns(
-        pl.col("logradouro").map_elements(
-            _normalise_address_key,
-            return_dtype=pl.Utf8,
-        ).alias("_address_key"),
-    ).filter(pl.col("_address_key").is_not_null())
+    with_key = (
+        empresas_df.select(
+            [
+                pl.col("cnpj"),
+                pl.col("logradouro"),
+            ]
+        )
+        .with_columns(
+            pl.col("logradouro")
+            .map_elements(
+                _normalise_address_key,
+                return_dtype=pl.Utf8,
+            )
+            .alias("_address_key"),
+        )
+        .filter(pl.col("_address_key").is_not_null())
+    )
 
     # Self-join on the address key to find companies at the same address.
     pairs = with_key.join(
@@ -193,11 +191,13 @@ def detectar_mesmo_endereco(
     # Keep only canonical pairs (cnpj_a < cnpj_b) to avoid duplicates.
     pairs = pairs.filter(pl.col("cnpj") < pl.col("cnpj_b"))
 
-    return pairs.select([
-        pl.col("cnpj").alias("cnpj_a"),
-        pl.col("cnpj_b"),
-        pl.col("_address_key").alias("endereco_compartilhado"),
-    ])
+    return pairs.select(
+        [
+            pl.col("cnpj").alias("cnpj_a"),
+            pl.col("cnpj_b"),
+            pl.col("_address_key").alias("endereco_compartilhado"),
+        ]
+    )
 
 
 def _normalise_address_key(logradouro: str | None) -> str | None:

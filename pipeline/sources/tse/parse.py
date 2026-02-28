@@ -83,10 +83,10 @@ def parse_doacoes(raw_path: Path) -> pl.DataFrame:
     doc_raw_list: list[str | None] = _safe_str_list("CPF_CNPJ_DOADOR")
     tipo_doador_list: list[str | None] = [classificar_doador(d) for d in doc_raw_list]
     cnpj_doador_list: list[str | None] = [
-        d if t == "CNPJ" else None for d, t in zip(doc_raw_list, tipo_doador_list)
+        d if t == "CNPJ" else None for d, t in zip(doc_raw_list, tipo_doador_list, strict=False)
     ]
     cpf_doador_list: list[str | None] = [
-        d if t == "CPF" else None for d, t in zip(doc_raw_list, tipo_doador_list)
+        d if t == "CPF" else None for d, t in zip(doc_raw_list, tipo_doador_list, strict=False)
     ]
 
     # Parse valor as float.
@@ -106,11 +106,7 @@ def parse_doacoes(raw_path: Path) -> pl.DataFrame:
     # Parse data_receita as Date.
     data_series: pl.Series
     if "DATA_RECEITA" in raw.columns:
-        data_series = (
-            raw["DATA_RECEITA"]
-            .str.strip_chars()
-            .str.to_date(format="%Y-%m-%d", strict=False)
-        )
+        data_series = raw["DATA_RECEITA"].str.strip_chars().str.to_date(format="%Y-%m-%d", strict=False)
     else:
         data_series = pl.Series("data_receita", [None] * n, dtype=pl.Date)
 

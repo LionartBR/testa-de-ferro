@@ -87,9 +87,7 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
 
     # 5. Pre-compute alerts
     _log("Computing alerts...")
-    alertas_df = detectar_alertas_batch(
-        empresas_df, socios_enriched, contratos_df, sancoes_df, doacoes_df
-    )
+    alertas_df = detectar_alertas_batch(empresas_df, socios_enriched, contratos_df, sancoes_df, doacoes_df)
     write_parquet(alertas_df, staging_dir / "alertas.parquet")
 
     # 6. Write enriched socios to staging — rename to match dim_socio schema
@@ -128,16 +126,18 @@ def _prepare_socios_staging(socios_df: pl.DataFrame) -> pl.DataFrame:
     is_sancionado = _get_col(socios_df, "is_sancionado").alias("is_sancionado")
     qtd_empresas = _get_col(socios_df, "qtd_empresas_governo").alias("qtd_empresas_governo")
 
-    return pl.DataFrame({
-        "pk_socio": list(range(1, n + 1)),
-        "cpf_hmac": cpf_hmac,
-        "nome": nome,
-        "qualificacao": qualificacao,
-        "is_servidor_publico": is_servidor,
-        "orgao_lotacao": orgao,
-        "is_sancionado": is_sancionado,
-        "qtd_empresas_governo": qtd_empresas,
-    })
+    return pl.DataFrame(
+        {
+            "pk_socio": list(range(1, n + 1)),
+            "cpf_hmac": cpf_hmac,
+            "nome": nome,
+            "qualificacao": qualificacao,
+            "is_servidor_publico": is_servidor,
+            "orgao_lotacao": orgao,
+            "is_sancionado": is_sancionado,
+            "qtd_empresas_governo": qtd_empresas,
+        }
+    )
 
 
 def _run_sources(config: PipelineConfig) -> None:
@@ -190,8 +190,7 @@ def _run_sources(config: PipelineConfig) -> None:
     raw_paths: dict[str, Path] = {}
     with ThreadPoolExecutor(max_workers=6) as pool:
         future_to_name = {
-            pool.submit(fn, url, dest, timeout): name
-            for name, (fn, url, dest, timeout) in download_tasks.items()
+            pool.submit(fn, url, dest, timeout): name for name, (fn, url, dest, timeout) in download_tasks.items()
         }
         for future in as_completed(future_to_name):
             name = future_to_name[future]
@@ -210,11 +209,13 @@ def _run_sources(config: PipelineConfig) -> None:
     contratos_df = validate_contratos(parse_contratos(raw_paths["pncp"]))
     write_parquet(contratos_df, staging_dir / "contratos.parquet")
 
-    sancoes_all = pl.concat([
-        parse_ceis(raw_paths["ceis"]),
-        parse_cnep(raw_paths["cnep"]),
-        parse_cepim(raw_paths["cepim"]),
-    ])
+    sancoes_all = pl.concat(
+        [
+            parse_ceis(raw_paths["ceis"]),
+            parse_cnep(raw_paths["cnep"]),
+            parse_cepim(raw_paths["cepim"]),
+        ]
+    )
     sancoes_df = validate_sancoes(sancoes_all)
     write_parquet(sancoes_df, staging_dir / "sancoes.parquet")
 

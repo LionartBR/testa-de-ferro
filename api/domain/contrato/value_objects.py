@@ -6,6 +6,7 @@ from decimal import Decimal
 @dataclass(frozen=True)
 class ValorContrato:
     """Valor em Decimal. Nunca float. Nunca negativo."""
+
     valor: Decimal
 
     def __post_init__(self) -> None:

@@ -34,11 +34,13 @@ def test_hmac_sha256_returns_64_hex_chars() -> None:
 
 def test_apply_hmac_removes_original_column() -> None:
     """apply_hmac_to_df drops the raw CPF column and adds 'cpf_hmac'."""
-    df = pl.DataFrame({
-        "nome": ["JOAO SILVA", "MARIA SOUZA"],
-        "cpf": ["12345678901", "98765432100"],
-        "outro_campo": [1, 2],
-    })
+    df = pl.DataFrame(
+        {
+            "nome": ["JOAO SILVA", "MARIA SOUZA"],
+            "cpf": ["12345678901", "98765432100"],
+            "outro_campo": [1, 2],
+        }
+    )
 
     result = apply_hmac_to_df(df, cpf_col="cpf", salt="test-salt")
 

@@ -15,7 +15,8 @@ class DuckDBDoacaoRepo:
         self._conn = conn
 
     def listar_por_fornecedor(self, cnpj: CNPJ) -> list[DoacaoEleitoral]:
-        rows = self._conn.execute("""
+        rows = self._conn.execute(
+            """
             SELECT dc.nome, dc.partido, dc.cargo,
                    fd.valor, fd.ano_eleicao,
                    ds.cpf_hmac
@@ -30,7 +31,9 @@ class DuckDBDoacaoRepo:
                    JOIN dim_fornecedor df2 ON bfs.fk_fornecedor = df2.pk_fornecedor
                    WHERE df2.cnpj = ?
                )
-        """, [cnpj.formatado, cnpj.formatado]).fetchall()
+        """,
+            [cnpj.formatado, cnpj.formatado],
+        ).fetchall()
         return [self._hidratar(r, cnpj) for r in rows]
 
     def _hidratar(self, row: tuple, cnpj: CNPJ) -> DoacaoEleitoral:  # type: ignore[type-arg]

@@ -50,5 +50,12 @@ class FichaService:
         score = calcular_score_cumulativo(fornecedor, socios, sancoes, contratos, referencia)
 
         return FichaCompletaDTO.from_domain(
-            fornecedor, alertas, score, contratos, socios, sancoes, referencia, doacoes,
+            fornecedor,
+            alertas,
+            score,
+            contratos,
+            socios,
+            sancoes,
+            referencia,
+            doacoes,
         )

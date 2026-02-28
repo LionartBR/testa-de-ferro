@@ -52,25 +52,18 @@ def validate_empresas(df: pl.DataFrame) -> pl.DataFrame:
         Cleaned DataFrame. Guaranteed: cnpj non-null, razao_social non-null.
     """
     # Step 1: filter invalid CNPJ formats.
-    valid_cnpj_mask = df["cnpj"].map_elements(
-        _is_valid_cnpj_format, return_dtype=pl.Boolean
-    )
+    valid_cnpj_mask = df["cnpj"].map_elements(_is_valid_cnpj_format, return_dtype=pl.Boolean)
     df = df.filter(valid_cnpj_mask)
 
     # Step 2: drop rows without razao_social.
-    df = df.filter(
-        pl.col("razao_social").is_not_null()
-        & (pl.col("razao_social").str.strip_chars() != "")
-    )
+    df = df.filter(pl.col("razao_social").is_not_null() & (pl.col("razao_social").str.strip_chars() != ""))
 
     # Step 3: deduplicate by cnpj (keep first).
     df = df.unique(subset=["cnpj"], keep="first", maintain_order=True)
 
     # Step 4: re-assign pk_fornecedor to ensure contiguous sequence.
     n = len(df)
-    df = df.with_columns(
-        pl.Series("pk_fornecedor", list(range(1, n + 1)))
-    )
+    df = df.with_columns(pl.Series("pk_fornecedor", list(range(1, n + 1))))
 
     return df
 
@@ -90,20 +83,12 @@ def validate_qsa(df: pl.DataFrame) -> pl.DataFrame:
         Cleaned DataFrame. Guaranteed: nome_socio and cnpj_basico are non-null.
     """
     # Step 1: drop rows without nome_socio.
-    df = df.filter(
-        pl.col("nome_socio").is_not_null()
-        & (pl.col("nome_socio").str.strip_chars() != "")
-    )
+    df = df.filter(pl.col("nome_socio").is_not_null() & (pl.col("nome_socio").str.strip_chars() != ""))
 
     # Step 2: drop rows without cnpj_basico.
-    df = df.filter(
-        pl.col("cnpj_basico").is_not_null()
-        & (pl.col("cnpj_basico").str.strip_chars() != "")
-    )
+    df = df.filter(pl.col("cnpj_basico").is_not_null() & (pl.col("cnpj_basico").str.strip_chars() != ""))
 
     # Step 3: deduplicate on (cnpj_basico, cpf_parcial).
-    df = df.unique(
-        subset=["cnpj_basico", "cpf_parcial"], keep="first", maintain_order=True
-    )
+    df = df.unique(subset=["cnpj_basico", "cpf_parcial"], keep="first", maintain_order=True)
 
     return df

@@ -55,10 +55,12 @@ def download_pncp(
     window_start = start
     while window_start < end:
         window_end = min(window_start + timedelta(days=30), end)
-        windows.append((
-            window_start.strftime("%Y%m%d"),
-            window_end.strftime("%Y%m%d"),
-        ))
+        windows.append(
+            (
+                window_start.strftime("%Y%m%d"),
+                window_end.strftime("%Y%m%d"),
+            )
+        )
         window_start = window_end + timedelta(days=1)
 
     # Fetch months in parallel
@@ -66,7 +68,12 @@ def download_pncp(
     with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
         futures = {
             pool.submit(
-                _fetch_window, base_url, di, df, timeout, max_pages_per_month,
+                _fetch_window,
+                base_url,
+                di,
+                df,
+                timeout,
+                max_pages_per_month,
             ): (di, df)
             for di, df in windows
         }

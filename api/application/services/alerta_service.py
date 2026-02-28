@@ -4,6 +4,7 @@
 ADR: Score e Alertas sao dimensoes INDEPENDENTES.
 Este modulo NUNCA deve importar o servico de score.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -47,17 +48,19 @@ def _detectar_socio_servidor(
     alertas: list[AlertaCritico] = []
     for socio in socios:
         if socio.is_servidor_publico:
-            alertas.append(AlertaCritico(
-                id=uuid.uuid4(),
-                tipo=TipoAlerta.SOCIO_SERVIDOR_PUBLICO,
-                severidade=Severidade.GRAVISSIMO,
-                descricao=f"Socio {socio.nome} e servidor publico"
-                          + (f" ({socio.orgao_lotacao})" if socio.orgao_lotacao else ""),
-                evidencia=f"socio_cpf_hmac={socio.cpf_hmac}, nome={socio.nome}"
-                          + (f", orgao={socio.orgao_lotacao}" if socio.orgao_lotacao else ""),
-                fornecedor_cnpj=fornecedor.cnpj,
-                detectado_em=datetime.now(),
-            ))
+            alertas.append(
+                AlertaCritico(
+                    id=uuid.uuid4(),
+                    tipo=TipoAlerta.SOCIO_SERVIDOR_PUBLICO,
+                    severidade=Severidade.GRAVISSIMO,
+                    descricao=f"Socio {socio.nome} e servidor publico"
+                    + (f" ({socio.orgao_lotacao})" if socio.orgao_lotacao else ""),
+                    evidencia=f"socio_cpf_hmac={socio.cpf_hmac}, nome={socio.nome}"
+                    + (f", orgao={socio.orgao_lotacao}" if socio.orgao_lotacao else ""),
+                    fornecedor_cnpj=fornecedor.cnpj,
+                    detectado_em=datetime.now(),
+                )
+            )
     return alertas
 
 
@@ -73,17 +76,18 @@ def _detectar_empresa_sancionada(
     if not sancoes_vigentes or not contratos:
         return []
 
-    return [AlertaCritico(
-        id=uuid.uuid4(),
-        tipo=TipoAlerta.EMPRESA_SANCIONADA_CONTRATANDO,
-        severidade=Severidade.GRAVISSIMO,
-        descricao=f"Empresa com {len(sancoes_vigentes)} sancao(oes) vigente(s) "
-                  f"e {len(contratos)} contrato(s) ativo(s)",
-        evidencia=f"sancoes_vigentes={[s.tipo.value for s in sancoes_vigentes]}, "
-                  f"qtd_contratos={len(contratos)}",
-        fornecedor_cnpj=fornecedor.cnpj,
-        detectado_em=datetime.now(),
-    )]
+    return [
+        AlertaCritico(
+            id=uuid.uuid4(),
+            tipo=TipoAlerta.EMPRESA_SANCIONADA_CONTRATANDO,
+            severidade=Severidade.GRAVISSIMO,
+            descricao=f"Empresa com {len(sancoes_vigentes)} sancao(oes) vigente(s) "
+            f"e {len(contratos)} contrato(s) ativo(s)",
+            evidencia=f"sancoes_vigentes={[s.tipo.value for s in sancoes_vigentes]}, qtd_contratos={len(contratos)}",
+            fornecedor_cnpj=fornecedor.cnpj,
+            detectado_em=datetime.now(),
+        )
+    ]
 
 
 def _detectar_doacao_para_contratante(
@@ -104,18 +108,20 @@ def _detectar_doacao_para_contratante(
     if valor_total_contratos <= _CONTRATO_THRESHOLD_DOACAO:
         return []
 
-    return [AlertaCritico(
-        id=uuid.uuid4(),
-        tipo=TipoAlerta.DOACAO_PARA_CONTRATANTE,
-        severidade=Severidade.GRAVE,
-        descricao=f"{len(doacoes_materiais)} doacao(oes) material(is) "
-                  f"com contratos totalizando R${valor_total_contratos:,.2f}",
-        evidencia=f"doacoes_materiais={len(doacoes_materiais)}, "
-                  f"valor_total_contratos={valor_total_contratos}, "
-                  f"candidatos={[d.candidato_nome for d in doacoes_materiais]}",
-        fornecedor_cnpj=fornecedor.cnpj,
-        detectado_em=datetime.now(),
-    )]
+    return [
+        AlertaCritico(
+            id=uuid.uuid4(),
+            tipo=TipoAlerta.DOACAO_PARA_CONTRATANTE,
+            severidade=Severidade.GRAVE,
+            descricao=f"{len(doacoes_materiais)} doacao(oes) material(is) "
+            f"com contratos totalizando R${valor_total_contratos:,.2f}",
+            evidencia=f"doacoes_materiais={len(doacoes_materiais)}, "
+            f"valor_total_contratos={valor_total_contratos}, "
+            f"candidatos={[d.candidato_nome for d in doacoes_materiais]}",
+            fornecedor_cnpj=fornecedor.cnpj,
+            detectado_em=datetime.now(),
+        )
+    ]
 
 
 def _detectar_socio_sancionado(
@@ -126,13 +132,15 @@ def _detectar_socio_sancionado(
     alertas: list[AlertaCritico] = []
     for socio in socios:
         if socio.is_sancionado:
-            alertas.append(AlertaCritico(
-                id=uuid.uuid4(),
-                tipo=TipoAlerta.SOCIO_SANCIONADO_EM_OUTRA,
-                severidade=Severidade.GRAVE,
-                descricao=f"Socio {socio.nome} e socio de outra empresa sancionada",
-                evidencia=f"socio_cpf_hmac={socio.cpf_hmac}, nome={socio.nome}",
-                fornecedor_cnpj=fornecedor.cnpj,
-                detectado_em=datetime.now(),
-            ))
+            alertas.append(
+                AlertaCritico(
+                    id=uuid.uuid4(),
+                    tipo=TipoAlerta.SOCIO_SANCIONADO_EM_OUTRA,
+                    severidade=Severidade.GRAVE,
+                    descricao=f"Socio {socio.nome} e socio de outra empresa sancionada",
+                    evidencia=f"socio_cpf_hmac={socio.cpf_hmac}, nome={socio.nome}",
+                    fornecedor_cnpj=fornecedor.cnpj,
+                    detectado_em=datetime.now(),
+                )
+            )
     return alertas

@@ -80,7 +80,7 @@ CNAE_CATEGORIES: dict[str, str] = {
     "5611-2": "ALIMENTACAO",
     "5612-1": "ALIMENTACAO",
     "5620-1": "ALIMENTACAO",
-    "4721-1": "ALIMENTACAO",  # supermercados (overlap accepted)
+    # 4721-1 already mapped to COMERCIO_VAREJO (supermercados)
     # Serviços de limpeza e conservação
     "8121-4": "LIMPEZA",
     "8122-2": "LIMPEZA",

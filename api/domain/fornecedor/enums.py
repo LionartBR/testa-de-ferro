@@ -4,6 +4,7 @@ from enum import StrEnum
 
 class TipoAlerta(StrEnum):
     """Tipos de alerta critico — flags binarias independentes do score."""
+
     SOCIO_SERVIDOR_PUBLICO = "SOCIO_SERVIDOR_PUBLICO"
     RODIZIO_LICITACAO = "RODIZIO_LICITACAO"
     EMPRESA_SANCIONADA_CONTRATANDO = "EMPRESA_SANCIONADA_CONTRATANDO"
@@ -19,6 +20,7 @@ class Severidade(StrEnum):
 
 class TipoIndicador(StrEnum):
     """Indicadores cumulativos que compoem o score. Nunca geram alerta."""
+
     CAPITAL_SOCIAL_BAIXO = "CAPITAL_SOCIAL_BAIXO"
     EMPRESA_RECENTE = "EMPRESA_RECENTE"
     CNAE_INCOMPATIVEL = "CNAE_INCOMPATIVEL"
@@ -31,10 +33,10 @@ class TipoIndicador(StrEnum):
 
 
 class FaixaRisco(StrEnum):
-    BAIXO = "Baixo"          # 0-20
-    MODERADO = "Moderado"    # 21-40
-    ALTO = "Alto"            # 41-65
-    CRITICO = "Critico"      # 66-100
+    BAIXO = "Baixo"  # 0-20
+    MODERADO = "Moderado"  # 21-40
+    ALTO = "Alto"  # 41-65
+    CRITICO = "Critico"  # 66-100
 
 
 class SituacaoCadastral(StrEnum):

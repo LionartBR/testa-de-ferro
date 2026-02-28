@@ -1,6 +1,7 @@
 # tests/domain/test_score_alerta_independencia.py
 """Invariante arquitetural: alertas e score sao dimensoes 100% independentes.
 Estes testes garantem que nunca se contaminam mutuamente."""
+
 import inspect
 from datetime import date
 
@@ -24,10 +25,10 @@ def test_alerta_nao_contamina_score():
     """Socio servidor gera alerta GRAVISSIMO mas NAO deve inflar o score."""
     socio = Socio(cpf_hmac="abc", nome="Maria", is_servidor_publico=True)
     fornecedor = _fornecedor()
-    alertas = detectar_alertas(fornecedor, socios=[socio], sancoes=[], contratos=[],
-                               referencia=date(2026, 2, 27))
-    score = calcular_score_cumulativo(fornecedor, socios=[socio], sancoes=[], contratos=[],
-                                      referencia=date(2026, 2, 27))
+    alertas = detectar_alertas(fornecedor, socios=[socio], sancoes=[], contratos=[], referencia=date(2026, 2, 27))
+    score = calcular_score_cumulativo(
+        fornecedor, socios=[socio], sancoes=[], contratos=[], referencia=date(2026, 2, 27)
+    )
     assert len(alertas) >= 1
     # Nenhum indicador de score deve ter nome referente a servidor
     assert not any(i.tipo.name == "SOCIO_SERVIDOR_PUBLICO" for i in score.indicadores)
@@ -36,6 +37,7 @@ def test_alerta_nao_contamina_score():
 def test_score_service_nunca_importa_alerta_service():
     """Garantia estrutural via inspecao de codigo-fonte."""
     import api.application.services.score_service as mod
+
     source = inspect.getsource(mod)
     assert "alerta_service" not in source
     assert "detectar_alertas" not in source
@@ -43,6 +45,7 @@ def test_score_service_nunca_importa_alerta_service():
 
 def test_alerta_service_nunca_importa_score_service():
     import api.application.services.alerta_service as mod
+
     source = inspect.getsource(mod)
     assert "score_service" not in source
     assert "calcular_score" not in source

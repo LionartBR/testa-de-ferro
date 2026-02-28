@@ -9,6 +9,7 @@ from decimal import Decimal
 class Socio:
     """Socio no dominio de leitura. cpf_hmac ja vem hashado do pipeline.
     Nunca armazena CPF em texto claro."""
+
     cpf_hmac: str
     nome: str
     qualificacao: str | None = None
@@ -21,6 +22,7 @@ class Socio:
 @dataclass(frozen=True)
 class VinculoSocietario:
     """Vinculo entre fornecedor e socio com datas e percentual."""
+
     socio: Socio
     data_entrada: str | None = None
     data_saida: str | None = None

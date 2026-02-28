@@ -94,19 +94,25 @@ def match_servidor_socio(
           - orgao_lotacao (str|null)     — filled from servidores for matches.
     """
     # Extract 6 visible digits from the QSA masked CPF column.
-    digitos_socio = socios_df["cpf_parcial"].map_elements(
-        _extrair_digitos_qsa,
-        return_dtype=pl.Utf8,
-    ).alias("_digitos_socio")
+    digitos_socio = (
+        socios_df["cpf_parcial"]
+        .map_elements(
+            _extrair_digitos_qsa,
+            return_dtype=pl.Utf8,
+        )
+        .alias("_digitos_socio")
+    )
 
     socios_with_digits = socios_df.with_columns(digitos_socio)
 
     # Prepare the servidores side with unambiguous join-key column names.
-    servidores_keys = servidores_df.select([
-        pl.col("nome").alias("_nome_servidor"),
-        pl.col("digitos_visiveis").alias("_digitos_servidor"),
-        pl.col("orgao_lotacao").alias("_orgao_servidor"),
-    ])
+    servidores_keys = servidores_df.select(
+        [
+            pl.col("nome").alias("_nome_servidor"),
+            pl.col("digitos_visiveis").alias("_digitos_servidor"),
+            pl.col("orgao_lotacao").alias("_orgao_servidor"),
+        ]
+    )
 
     # Add the socio name as a normalised join key (already uppercase from parser,
     # but strip again defensively).
@@ -119,16 +125,14 @@ def match_servidor_socio(
     # ADR: Composite key via string concat is safe here because both parts are
     # fixed-format (uppercase name + exactly 6 digits). A separator character
     # that cannot appear in names/digits ("|") eliminates false collisions.
-    SEPARATOR = "|"
+    _separator = "|"
 
     socios_keyed = socios_keyed.with_columns(
-        (pl.col("_nome_socio_norm") + SEPARATOR + pl.col("_digitos_socio").fill_null(""))
-        .alias("_match_key"),
+        (pl.col("_nome_socio_norm") + _separator + pl.col("_digitos_socio").fill_null("")).alias("_match_key"),
     )
 
     servidores_keys = servidores_keys.with_columns(
-        (pl.col("_nome_servidor") + SEPARATOR + pl.col("_digitos_servidor").fill_null(""))
-        .alias("_match_key"),
+        (pl.col("_nome_servidor") + _separator + pl.col("_digitos_servidor").fill_null("")).alias("_match_key"),
     )
 
     # Drop rows from servidores where either name or digits is null — they cannot

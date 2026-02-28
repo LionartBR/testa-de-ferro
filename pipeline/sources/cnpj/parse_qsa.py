@@ -61,10 +61,7 @@ def parse_qsa(raw_path: Path) -> pl.DataFrame:
     # DATA_ENTRADA: YYYYMMDD → Date (same format as empresas).
     if "DATA_ENTRADA" in raw.columns:
         data_entrada = (
-            raw["DATA_ENTRADA"]
-            .str.strip_chars()
-            .str.to_date(format="%Y%m%d", strict=False)
-            .alias("data_entrada")
+            raw["DATA_ENTRADA"].str.strip_chars().str.to_date(format="%Y%m%d", strict=False).alias("data_entrada")
         )
     else:
         data_entrada = pl.Series("data_entrada", [None] * n, dtype=pl.Date)

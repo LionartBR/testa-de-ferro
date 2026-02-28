@@ -31,7 +31,7 @@
 #   - pk_score_detalhe is a sequential integer assigned at the end.
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import polars as pl
@@ -82,7 +82,7 @@ def calcular_scores_batch(
           pk_score_detalhe (int), fk_fornecedor (int), indicador (str),
           peso (int), descricao (str), evidencia (str), calculado_em (datetime).
     """
-    calculado_em = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+    calculado_em = datetime.now(tz=UTC).replace(tzinfo=None)
     rows: list[dict[str, object]] = []
 
     rows.extend(_capital_social_baixo_batch(empresas_df, contratos_df, calculado_em))
@@ -96,15 +96,17 @@ def calcular_scores_batch(
 
     result = pl.DataFrame(rows)
     result = result.with_row_index(name="pk_score_detalhe", offset=1)
-    return result.select([
-        "pk_score_detalhe",
-        "fk_fornecedor",
-        "indicador",
-        "peso",
-        "descricao",
-        "evidencia",
-        "calculado_em",
-    ])
+    return result.select(
+        [
+            "pk_score_detalhe",
+            "fk_fornecedor",
+            "indicador",
+            "peso",
+            "descricao",
+            "evidencia",
+            "calculado_em",
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -126,17 +128,15 @@ def _capital_social_baixo_batch(
     if valor_col is None:
         return []
 
-    totais = (
-        contratos_df
-        .group_by("fk_fornecedor")
-        .agg(pl.col(valor_col).cast(pl.Float64).sum().alias("valor_total"))
-    )
+    totais = contratos_df.group_by("fk_fornecedor").agg(pl.col(valor_col).cast(pl.Float64).sum().alias("valor_total"))
 
     # Join against empresas.
-    joined = empresas_df.select([
-        pl.col("pk_fornecedor"),
-        pl.col("capital_social").cast(pl.Float64).alias("capital_social"),
-    ]).join(totais, left_on="pk_fornecedor", right_on="fk_fornecedor", how="inner")
+    joined = empresas_df.select(
+        [
+            pl.col("pk_fornecedor"),
+            pl.col("capital_social").cast(pl.Float64).alias("capital_social"),
+        ]
+    ).join(totais, left_on="pk_fornecedor", right_on="fk_fornecedor", how="inner")
 
     capital_threshold = float(_CAPITAL_THRESHOLD_GENERICO)
     contrato_threshold = float(_CONTRATO_MINIMO_PARA_CAPITAL)
@@ -149,20 +149,19 @@ def _capital_social_baixo_batch(
 
     rows: list[dict[str, object]] = []
     for row in flagged.iter_rows(named=True):
-        rows.append({
-            "fk_fornecedor": row["pk_fornecedor"],
-            "indicador": "CAPITAL_SOCIAL_BAIXO",
-            "peso": _PESO_CAPITAL_SOCIAL_BAIXO,
-            "descricao": (
-                f"Capital social R${row['capital_social']:,.2f} "
-                f"desproporcional a contratos R${row['valor_total']:,.2f}"
-            ),
-            "evidencia": (
-                f"capital={row['capital_social']}, "
-                f"valor_total_contratos={row['valor_total']}"
-            ),
-            "calculado_em": calculado_em,
-        })
+        rows.append(
+            {
+                "fk_fornecedor": row["pk_fornecedor"],
+                "indicador": "CAPITAL_SOCIAL_BAIXO",
+                "peso": _PESO_CAPITAL_SOCIAL_BAIXO,
+                "descricao": (
+                    f"Capital social R${row['capital_social']:,.2f} "
+                    f"desproporcional a contratos R${row['valor_total']:,.2f}"
+                ),
+                "evidencia": (f"capital={row['capital_social']}, valor_total_contratos={row['valor_total']}"),
+                "calculado_em": calculado_em,
+            }
+        )
     return rows
 
 
@@ -179,16 +178,17 @@ def _empresa_recente_batch(
 
     # Earliest contract date per fornecedor.
     primeiros = (
-        contratos_df
-        .filter(pl.col("data_assinatura").is_not_null())
+        contratos_df.filter(pl.col("data_assinatura").is_not_null())
         .group_by("fk_fornecedor")
         .agg(pl.col("data_assinatura").min().alias("primeiro_contrato"))
     )
 
-    joined = empresas_df.select([
-        pl.col("pk_fornecedor"),
-        pl.col("data_abertura"),
-    ]).join(primeiros, left_on="pk_fornecedor", right_on="fk_fornecedor", how="inner")
+    joined = empresas_df.select(
+        [
+            pl.col("pk_fornecedor"),
+            pl.col("data_abertura"),
+        ]
+    ).join(primeiros, left_on="pk_fornecedor", right_on="fk_fornecedor", how="inner")
 
     joined = joined.filter(pl.col("data_abertura").is_not_null())
 
@@ -197,11 +197,9 @@ def _empresa_recente_batch(
 
     # Compute days from abertura to first contract.
     joined = joined.with_columns(
-        (
-            (pl.col("primeiro_contrato").cast(pl.Date) - pl.col("data_abertura").cast(pl.Date))
-            .dt.total_days()
-            .alias("dias")
-        )
+        (pl.col("primeiro_contrato").cast(pl.Date) - pl.col("data_abertura").cast(pl.Date))
+        .dt.total_days()
+        .alias("dias")
     )
 
     # 6 months ≈ 6 * 30.44 days
@@ -210,22 +208,24 @@ def _empresa_recente_batch(
 
     rows: list[dict[str, object]] = []
     for row in flagged.iter_rows(named=True):
-        rows.append({
-            "fk_fornecedor": row["pk_fornecedor"],
-            "indicador": "EMPRESA_RECENTE",
-            "peso": _PESO_EMPRESA_RECENTE,
-            "descricao": (
-                f"Empresa aberta em {row['data_abertura']} obteve "
-                f"primeiro contrato em {row['primeiro_contrato']} "
-                f"({row['dias']} dias depois)"
-            ),
-            "evidencia": (
-                f"data_abertura={row['data_abertura']}, "
-                f"primeiro_contrato={row['primeiro_contrato']}, "
-                f"dias={row['dias']}"
-            ),
-            "calculado_em": calculado_em,
-        })
+        rows.append(
+            {
+                "fk_fornecedor": row["pk_fornecedor"],
+                "indicador": "EMPRESA_RECENTE",
+                "peso": _PESO_EMPRESA_RECENTE,
+                "descricao": (
+                    f"Empresa aberta em {row['data_abertura']} obteve "
+                    f"primeiro contrato em {row['primeiro_contrato']} "
+                    f"({row['dias']} dias depois)"
+                ),
+                "evidencia": (
+                    f"data_abertura={row['data_abertura']}, "
+                    f"primeiro_contrato={row['primeiro_contrato']}, "
+                    f"dias={row['dias']}"
+                ),
+                "calculado_em": calculado_em,
+            }
+        )
     return rows
 
 
@@ -238,26 +238,21 @@ def _sancao_historica_batch(
     if sancoes_df.is_empty():
         return []
 
-    today = datetime.now(tz=timezone.utc).date()
+    today = datetime.now(tz=UTC).date()
 
     # Expired = data_fim is not null AND data_fim <= today.
     if "data_fim" not in sancoes_df.columns:
         return []
 
     expiradas = sancoes_df.filter(
-        pl.col("data_fim").is_not_null()
-        & (pl.col("data_fim").cast(pl.Date) <= pl.lit(today))
+        pl.col("data_fim").is_not_null() & (pl.col("data_fim").cast(pl.Date) <= pl.lit(today))
     )
 
     if expiradas.is_empty():
         return []
 
     # Count expired sanctions per fornecedor.
-    contagem = (
-        expiradas
-        .group_by("fk_fornecedor")
-        .agg(pl.len().alias("qtd_expiradas"))
-    )
+    contagem = expiradas.group_by("fk_fornecedor").agg(pl.len().alias("qtd_expiradas"))
 
     # Restrict to known fornecedores.
     known_fornecedores = set(empresas_df["pk_fornecedor"].to_list())
@@ -265,14 +260,16 @@ def _sancao_historica_batch(
 
     rows: list[dict[str, object]] = []
     for row in contagem.iter_rows(named=True):
-        rows.append({
-            "fk_fornecedor": row["fk_fornecedor"],
-            "indicador": "SANCAO_HISTORICA",
-            "peso": _PESO_SANCAO_HISTORICA,
-            "descricao": f"{row['qtd_expiradas']} sancao(oes) historica(s) expirada(s)",
-            "evidencia": f"sancoes_expiradas={row['qtd_expiradas']}",
-            "calculado_em": calculado_em,
-        })
+        rows.append(
+            {
+                "fk_fornecedor": row["fk_fornecedor"],
+                "indicador": "SANCAO_HISTORICA",
+                "peso": _PESO_SANCAO_HISTORICA,
+                "descricao": f"{row['qtd_expiradas']} sancao(oes) historica(s) expirada(s)",
+                "evidencia": f"sancoes_expiradas={row['qtd_expiradas']}",
+                "calculado_em": calculado_em,
+            }
+        )
     return rows
 
 
@@ -286,9 +283,7 @@ def _socio_em_multiplas_batch(
         return []
 
     # Find sócios that appear in >= 3 government-supplier companies.
-    socios_multiplas = socios_df.filter(
-        pl.col("qtd_empresas_governo") >= _MULTIPLAS_FORNECEDORAS_THRESHOLD
-    )
+    socios_multiplas = socios_df.filter(pl.col("qtd_empresas_governo") >= _MULTIPLAS_FORNECEDORAS_THRESHOLD)
 
     if socios_multiplas.is_empty():
         return []
@@ -297,15 +292,15 @@ def _socio_em_multiplas_batch(
     if "pk_fornecedor" not in empresas_df.columns or "cnpj_basico" not in empresas_df.columns:
         return []
 
-    basico_to_pk = empresas_df.select([
-        pl.col("cnpj_basico").str.zfill(8).alias("cnpj_basico"),
-        pl.col("pk_fornecedor"),
-    ])
+    basico_to_pk = empresas_df.select(
+        [
+            pl.col("cnpj_basico").str.zfill(8).alias("cnpj_basico"),
+            pl.col("pk_fornecedor"),
+        ]
+    )
 
     # Join socios_multiplas against empresas to get fk_fornecedor.
-    socios_norm = socios_multiplas.with_columns(
-        pl.col("cnpj_basico").str.zfill(8)
-    )
+    socios_norm = socios_multiplas.with_columns(pl.col("cnpj_basico").str.zfill(8))
 
     joined = socios_norm.join(basico_to_pk, on="cnpj_basico", how="inner")
 
@@ -313,14 +308,12 @@ def _socio_em_multiplas_batch(
         return []
 
     # Aggregate: per fornecedor, count how many of its sócios are in multiplas.
-    per_fornecedor = (
-        joined
-        .group_by(["pk_fornecedor", "cnpj_basico"])
-        .agg([
+    per_fornecedor = joined.group_by(["pk_fornecedor", "cnpj_basico"]).agg(
+        [
             pl.len().alias("qtd_socios_multiplas"),
             pl.col("nome_socio").alias("nomes"),
             pl.col("qtd_empresas_governo").alias("qtd_empresas"),
-        ])
+        ]
     )
 
     rows: list[dict[str, object]] = []
@@ -328,17 +321,18 @@ def _socio_em_multiplas_batch(
         nomes = row["nomes"]
         qtds = row["qtd_empresas"]
         pairs = list(zip(nomes, qtds, strict=False))
-        rows.append({
-            "fk_fornecedor": row["pk_fornecedor"],
-            "indicador": "SOCIO_EM_MULTIPLAS_FORNECEDORAS",
-            "peso": _PESO_SOCIO_EM_MULTIPLAS_FORNECEDORAS,
-            "descricao": (
-                f"{row['qtd_socios_multiplas']} socio(s) presente(s) "
-                f"em 3+ empresas fornecedoras do governo"
-            ),
-            "evidencia": f"socios={pairs}",
-            "calculado_em": calculado_em,
-        })
+        rows.append(
+            {
+                "fk_fornecedor": row["pk_fornecedor"],
+                "indicador": "SOCIO_EM_MULTIPLAS_FORNECEDORAS",
+                "peso": _PESO_SOCIO_EM_MULTIPLAS_FORNECEDORAS,
+                "descricao": (
+                    f"{row['qtd_socios_multiplas']} socio(s) presente(s) em 3+ empresas fornecedoras do governo"
+                ),
+                "evidencia": f"socios={pairs}",
+                "calculado_em": calculado_em,
+            }
+        )
     return rows
 
 
@@ -352,13 +346,14 @@ def _fornecedor_exclusivo_batch(
         return []
 
     orgao_counts = (
-        contratos_df
-        .group_by("fk_fornecedor")
-        .agg([
-            pl.col("fk_orgao").n_unique().alias("qtd_orgaos"),
-            pl.col("fk_orgao").first().alias("orgao_unico"),
-            pl.len().alias("qtd_contratos"),
-        ])
+        contratos_df.group_by("fk_fornecedor")
+        .agg(
+            [
+                pl.col("fk_orgao").n_unique().alias("qtd_orgaos"),
+                pl.col("fk_orgao").first().alias("orgao_unico"),
+                pl.len().alias("qtd_contratos"),
+            ]
+        )
         .filter(pl.col("qtd_orgaos") == 1)
     )
 
@@ -366,37 +361,33 @@ def _fornecedor_exclusivo_batch(
         return []
 
     known_fornecedores = set(empresas_df["pk_fornecedor"].to_list())
-    orgao_counts = orgao_counts.filter(
-        pl.col("fk_fornecedor").is_in(list(known_fornecedores))
-    )
+    orgao_counts = orgao_counts.filter(pl.col("fk_fornecedor").is_in(list(known_fornecedores)))
 
     rows: list[dict[str, object]] = []
     for row in orgao_counts.iter_rows(named=True):
-        rows.append({
-            "fk_fornecedor": row["fk_fornecedor"],
-            "indicador": "FORNECEDOR_EXCLUSIVO",
-            "peso": _PESO_FORNECEDOR_EXCLUSIVO,
-            "descricao": (
-                f"Todos os {row['qtd_contratos']} contrato(s) "
-                f"sao com o mesmo orgao"
-            ),
-            "evidencia": (
-                f"orgao_codigo={row['orgao_unico']}, "
-                f"qtd_contratos={row['qtd_contratos']}"
-            ),
-            "calculado_em": calculado_em,
-        })
+        rows.append(
+            {
+                "fk_fornecedor": row["fk_fornecedor"],
+                "indicador": "FORNECEDOR_EXCLUSIVO",
+                "peso": _PESO_FORNECEDOR_EXCLUSIVO,
+                "descricao": (f"Todos os {row['qtd_contratos']} contrato(s) sao com o mesmo orgao"),
+                "evidencia": (f"orgao_codigo={row['orgao_unico']}, qtd_contratos={row['qtd_contratos']}"),
+                "calculado_em": calculado_em,
+            }
+        )
     return rows
 
 
 def _empty_score_df() -> pl.DataFrame:
     """Return an empty DataFrame with the fato_score_detalhe schema."""
-    return pl.DataFrame({
-        "pk_score_detalhe": pl.Series([], dtype=pl.Int64),
-        "fk_fornecedor": pl.Series([], dtype=pl.Int64),
-        "indicador": pl.Series([], dtype=pl.Utf8),
-        "peso": pl.Series([], dtype=pl.Int64),
-        "descricao": pl.Series([], dtype=pl.Utf8),
-        "evidencia": pl.Series([], dtype=pl.Utf8),
-        "calculado_em": pl.Series([], dtype=pl.Datetime),
-    })
+    return pl.DataFrame(
+        {
+            "pk_score_detalhe": pl.Series([], dtype=pl.Int64),
+            "fk_fornecedor": pl.Series([], dtype=pl.Int64),
+            "indicador": pl.Series([], dtype=pl.Utf8),
+            "peso": pl.Series([], dtype=pl.Int64),
+            "descricao": pl.Series([], dtype=pl.Utf8),
+            "evidencia": pl.Series([], dtype=pl.Utf8),
+            "calculado_em": pl.Series([], dtype=pl.Datetime),
+        }
+    )

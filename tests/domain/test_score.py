@@ -39,11 +39,13 @@ def _contrato(valor: Decimal = Decimal("500000"), orgao: str = "00001") -> Contr
 
 # ---------- CAPITAL_SOCIAL_BAIXO (peso 15) ----------
 
+
 def test_capital_social_baixo_com_contrato_alto_ativa():
     """Capital R$800, contratos > R$100k -> ativa indicador."""
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(capital=Decimal("800")),
-        socios=[], sancoes=[],
+        socios=[],
+        sancoes=[],
         contratos=[_contrato(Decimal("150000"))],
         referencia=date(2026, 2, 27),
     )
@@ -56,7 +58,8 @@ def test_capital_social_adequado_nao_ativa():
     """Capital R$1.000.000 -> nao ativa mesmo com contratos altos."""
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(capital=Decimal("1000000")),
-        socios=[], sancoes=[],
+        socios=[],
+        sancoes=[],
         contratos=[_contrato(Decimal("5000000"))],
         referencia=date(2026, 2, 27),
     )
@@ -67,7 +70,9 @@ def test_capital_social_baixo_sem_contrato_nao_ativa():
     """Sem contratos -> sem referencia de desproporcionalidade."""
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(capital=Decimal("100")),
-        socios=[], sancoes=[], contratos=[],
+        socios=[],
+        sancoes=[],
+        contratos=[],
         referencia=date(2026, 2, 27),
     )
     assert not any(i.tipo == TipoIndicador.CAPITAL_SOCIAL_BAIXO for i in score.indicadores)
@@ -75,12 +80,14 @@ def test_capital_social_baixo_sem_contrato_nao_ativa():
 
 # ---------- EMPRESA_RECENTE (peso 10) ----------
 
+
 def test_empresa_recente_ativa_indicador():
     """Empresa aberta < 6 meses antes do primeiro contrato."""
     abertura = date(2025, 3, 1)  # ~4 meses antes do contrato em jun/2025
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(data_abertura=abertura),
-        socios=[], sancoes=[],
+        socios=[],
+        sancoes=[],
         contratos=[_contrato()],
         referencia=date(2026, 2, 27),
     )
@@ -92,7 +99,8 @@ def test_empresa_antiga_nao_ativa_recente():
     abertura = date(2020, 1, 1)  # ~5 anos antes
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(data_abertura=abertura),
-        socios=[], sancoes=[],
+        socios=[],
+        sancoes=[],
         contratos=[_contrato()],
         referencia=date(2026, 2, 27),
     )
@@ -103,7 +111,8 @@ def test_empresa_sem_data_abertura_nao_ativa_recente():
     """Se data_abertura nao disponivel, nao ativar (fail-safe)."""
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(data_abertura=None),
-        socios=[], sancoes=[],
+        socios=[],
+        sancoes=[],
         contratos=[_contrato()],
         referencia=date(2026, 2, 27),
     )
@@ -112,13 +121,17 @@ def test_empresa_sem_data_abertura_nao_ativa_recente():
 
 # ---------- SANCAO_HISTORICA (peso 5) ----------
 
+
 def test_sancao_expirada_gera_indicador_peso_5():
     """Sancao expirada -> SANCAO_HISTORICA no score (nunca alerta)."""
-    sancao = Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU",
-                    data_inicio=date(2020, 1, 1), data_fim=date(2022, 12, 31))
+    sancao = Sancao(
+        tipo=TipoSancao.CEIS, orgao_sancionador="CGU", data_inicio=date(2020, 1, 1), data_fim=date(2022, 12, 31)
+    )
     score = calcular_score_cumulativo(
-        fornecedor=_fornecedor(), socios=[],
-        sancoes=[sancao], contratos=[],
+        fornecedor=_fornecedor(),
+        socios=[],
+        sancoes=[sancao],
+        contratos=[],
         referencia=date(2026, 2, 27),
     )
     hist = [i for i in score.indicadores if i.tipo == TipoIndicador.SANCAO_HISTORICA]
@@ -128,11 +141,12 @@ def test_sancao_expirada_gera_indicador_peso_5():
 
 def test_sancao_vigente_nao_gera_indicador_historica():
     """Sancao vigente gera alerta (Step 7), nao indicador de score."""
-    sancao = Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU",
-                    data_inicio=date(2023, 1, 1), data_fim=None)
+    sancao = Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU", data_inicio=date(2023, 1, 1), data_fim=None)
     score = calcular_score_cumulativo(
-        fornecedor=_fornecedor(), socios=[],
-        sancoes=[sancao], contratos=[],
+        fornecedor=_fornecedor(),
+        socios=[],
+        sancoes=[sancao],
+        contratos=[],
         referencia=date(2026, 2, 27),
     )
     assert not any(i.tipo == TipoIndicador.SANCAO_HISTORICA for i in score.indicadores)
@@ -140,12 +154,15 @@ def test_sancao_vigente_nao_gera_indicador_historica():
 
 # ---------- SOCIO_EM_MULTIPLAS_FORNECEDORAS (peso 20) ----------
 
+
 def test_socio_em_3_ou_mais_empresas_ativa_indicador():
     """Socio com qtd_empresas_governo >= 3 -> ativa indicador peso 20."""
     socio = Socio(cpf_hmac="abc", nome="Joao", qtd_empresas_governo=3)
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(),
-        socios=[socio], sancoes=[], contratos=[],
+        socios=[socio],
+        sancoes=[],
+        contratos=[],
         referencia=date(2026, 2, 27),
     )
     ind = [i for i in score.indicadores if i.tipo == TipoIndicador.SOCIO_EM_MULTIPLAS_FORNECEDORAS]
@@ -158,7 +175,9 @@ def test_socio_em_2_empresas_nao_ativa():
     socio = Socio(cpf_hmac="abc", nome="Joao", qtd_empresas_governo=2)
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(),
-        socios=[socio], sancoes=[], contratos=[],
+        socios=[socio],
+        sancoes=[],
+        contratos=[],
         referencia=date(2026, 2, 27),
     )
     assert not any(i.tipo == TipoIndicador.SOCIO_EM_MULTIPLAS_FORNECEDORAS for i in score.indicadores)
@@ -172,7 +191,9 @@ def test_multiplos_socios_em_multiplas_gera_um_indicador():
     ]
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(),
-        socios=socios, sancoes=[], contratos=[],
+        socios=socios,
+        sancoes=[],
+        contratos=[],
         referencia=date(2026, 2, 27),
     )
     ind = [i for i in score.indicadores if i.tipo == TipoIndicador.SOCIO_EM_MULTIPLAS_FORNECEDORAS]
@@ -181,12 +202,14 @@ def test_multiplos_socios_em_multiplas_gera_um_indicador():
 
 # ---------- FORNECEDOR_EXCLUSIVO (peso 10) ----------
 
+
 def test_fornecedor_todos_contratos_mesmo_orgao_ativa():
     """Todos contratos com mesmo orgao -> ativa indicador peso 10."""
     contratos = [_contrato(orgao="26000"), _contrato(Decimal("100000"), orgao="26000")]
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(),
-        socios=[], sancoes=[],
+        socios=[],
+        sancoes=[],
         contratos=contratos,
         referencia=date(2026, 2, 27),
     )
@@ -200,7 +223,8 @@ def test_fornecedor_contratos_multiplos_orgaos_nao_ativa():
     contratos = [_contrato(orgao="26000"), _contrato(orgao="54000")]
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(),
-        socios=[], sancoes=[],
+        socios=[],
+        sancoes=[],
         contratos=contratos,
         referencia=date(2026, 2, 27),
     )
@@ -211,13 +235,16 @@ def test_fornecedor_sem_contratos_nao_ativa_exclusivo():
     """Sem contratos -> nao ativa."""
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(),
-        socios=[], sancoes=[], contratos=[],
+        socios=[],
+        sancoes=[],
+        contratos=[],
         referencia=date(2026, 2, 27),
     )
     assert not any(i.tipo == TipoIndicador.FORNECEDOR_EXCLUSIVO for i in score.indicadores)
 
 
 # ---------- SCORE GERAL ----------
+
 
 def test_score_nunca_excede_100():
     """Mesmo com todos indicadores ativos, cap em 100."""
@@ -227,8 +254,11 @@ def test_score_nunca_excede_100():
             data_abertura=date(2025, 5, 1),
         ),
         socios=[Socio(cpf_hmac="a", nome="Joao", qtd_empresas_governo=5)],
-        sancoes=[Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU",
-                        data_inicio=date(2020, 1, 1), data_fim=date(2022, 12, 31))],
+        sancoes=[
+            Sancao(
+                tipo=TipoSancao.CEIS, orgao_sancionador="CGU", data_inicio=date(2020, 1, 1), data_fim=date(2022, 12, 31)
+            )
+        ],
         contratos=[_contrato(Decimal("200000"))],
         referencia=date(2026, 2, 27),
     )
@@ -238,7 +268,9 @@ def test_score_nunca_excede_100():
 def test_sem_indicadores_score_zero():
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(capital=Decimal("1000000"), data_abertura=date(2010, 1, 1)),
-        socios=[], sancoes=[], contratos=[],
+        socios=[],
+        sancoes=[],
+        contratos=[],
         referencia=date(2026, 2, 27),
     )
     assert score.valor == 0
@@ -253,9 +285,9 @@ def test_faixa_risco_moderado():
             capital=Decimal("100"),
             data_abertura=date(2025, 5, 1),
         ),
-        socios=[], sancoes=[],
-        contratos=[_contrato(Decimal("100000"), orgao="26000"),
-                   _contrato(Decimal("100000"), orgao="54000")],
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato(Decimal("100000"), orgao="26000"), _contrato(Decimal("100000"), orgao="54000")],
         referencia=date(2026, 2, 27),
     )
     # capital_baixo(15) + empresa_recente(10) = 25 -> Moderado
@@ -271,8 +303,11 @@ def test_score_com_todos_novos_indicadores():
             data_abertura=date(2025, 5, 1),
         ),
         socios=[Socio(cpf_hmac="a", nome="Joao", qtd_empresas_governo=5)],
-        sancoes=[Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU",
-                        data_inicio=date(2020, 1, 1), data_fim=date(2022, 12, 31))],
+        sancoes=[
+            Sancao(
+                tipo=TipoSancao.CEIS, orgao_sancionador="CGU", data_inicio=date(2020, 1, 1), data_fim=date(2022, 12, 31)
+            )
+        ],
         contratos=[_contrato(Decimal("200000"))],
         referencia=date(2026, 2, 27),
     )

@@ -113,9 +113,7 @@ def build_duckdb(staging_dir: Path, output_path: Path) -> Path:
         raise
 
 
-def _load_staging_data(
-    conn: duckdb.DuckDBPyConnection, staging_dir: Path
-) -> None:
+def _load_staging_data(conn: duckdb.DuckDBPyConnection, staging_dir: Path) -> None:
     """Load all existing staging Parquet files into their DuckDB tables.
 
     Files that do not exist in staging_dir are silently skipped — this allows
@@ -141,8 +139,8 @@ def _load_staging_data(
         # path — neither value is user-controlled, so injection is not possible.
         table_cols = [
             row[0]
-            for row in conn.execute(  # noqa: S608
-                f"SELECT column_name FROM information_schema.columns "
+            for row in conn.execute(
+                f"SELECT column_name FROM information_schema.columns "  # noqa: S608
                 f"WHERE table_name = '{table_name}' ORDER BY ordinal_position"
             ).fetchall()
         ]

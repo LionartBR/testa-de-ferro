@@ -68,14 +68,16 @@ def test_parse_servidores_digitos_visiveis_extraidos() -> None:
 
 def test_validate_remove_duplicatas() -> None:
     """Dedup by (nome, digitos_visiveis) keeps first occurrence."""
-    df = pl.DataFrame({
-        "nome": ["JOAO SILVA", "JOAO SILVA"],
-        "cpf_mascarado": ["***.222.333-**", "***.222.333-**"],
-        "digitos_visiveis": ["222333", "222333"],
-        "cargo": ["TECNICO", "ANALISTA"],
-        "orgao_lotacao": ["MEC", "MEC"],
-        "is_servidor_publico": [True, True],
-    })
+    df = pl.DataFrame(
+        {
+            "nome": ["JOAO SILVA", "JOAO SILVA"],
+            "cpf_mascarado": ["***.222.333-**", "***.222.333-**"],
+            "digitos_visiveis": ["222333", "222333"],
+            "cargo": ["TECNICO", "ANALISTA"],
+            "orgao_lotacao": ["MEC", "MEC"],
+            "is_servidor_publico": [True, True],
+        }
+    )
     result = validate_servidores(df)
 
     assert len(result) == 1
@@ -84,14 +86,16 @@ def test_validate_remove_duplicatas() -> None:
 
 def test_validate_rejeita_sem_nome() -> None:
     """Rows without nome are dropped."""
-    df = pl.DataFrame({
-        "nome": [None, "MARIA OLIVEIRA"],
-        "cpf_mascarado": ["***.111.222-**", "***.333.444-**"],
-        "digitos_visiveis": ["111222", "333444"],
-        "cargo": ["CARGO X", "ANALISTA"],
-        "orgao_lotacao": ["ORG1", "ORG2"],
-        "is_servidor_publico": [True, True],
-    })
+    df = pl.DataFrame(
+        {
+            "nome": [None, "MARIA OLIVEIRA"],
+            "cpf_mascarado": ["***.111.222-**", "***.333.444-**"],
+            "digitos_visiveis": ["111222", "333444"],
+            "cargo": ["CARGO X", "ANALISTA"],
+            "orgao_lotacao": ["ORG1", "ORG2"],
+            "is_servidor_publico": [True, True],
+        }
+    )
     result = validate_servidores(df)
 
     assert len(result) == 1

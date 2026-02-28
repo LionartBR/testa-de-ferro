@@ -41,10 +41,7 @@ def validate_sancoes(df: pl.DataFrame) -> pl.DataFrame:
         Cleaned DataFrame. data_fim may remain null (vigente semantics).
     """
     # Step 1: require cnpj.
-    df = df.filter(
-        pl.col("cnpj").is_not_null()
-        & (pl.col("cnpj").str.strip_chars() != "")
-    )
+    df = df.filter(pl.col("cnpj").is_not_null() & (pl.col("cnpj").str.strip_chars() != ""))
 
     # Step 2: require data_inicio.
     df = df.filter(pl.col("data_inicio").is_not_null())
@@ -58,8 +55,6 @@ def validate_sancoes(df: pl.DataFrame) -> pl.DataFrame:
 
     # Step 4: re-key pk_sancao.
     n = len(df)
-    df = df.with_columns(
-        pl.Series("pk_sancao", list(range(1, n + 1)))
-    )
+    df = df.with_columns(pl.Series("pk_sancao", list(range(1, n + 1))))
 
     return df

@@ -62,11 +62,13 @@ def construir_grafo(
         return nos_empty, arestas_empty
 
     # Normalise empresas: need cnpj_basico → (cnpj, razao_social).
-    empresas_lookup = empresas_df.select([
-        pl.col("cnpj_basico").str.zfill(8),
-        pl.col("cnpj").alias("cnpj_formatado"),
-        pl.col("razao_social"),
-    ]).unique(subset=["cnpj_basico"])
+    empresas_lookup = empresas_df.select(
+        [
+            pl.col("cnpj_basico").str.zfill(8),
+            pl.col("cnpj").alias("cnpj_formatado"),
+            pl.col("razao_social"),
+        ]
+    ).unique(subset=["cnpj_basico"])
 
     # Build the sócio node ID: prefer cpf_hmac, fall back to nome_socio.
     if "cpf_hmac" in socios_df.columns:
@@ -95,11 +97,13 @@ def construir_grafo(
     # ------------------------------------------------------------------
     # Level 0 edges: sócio → empresa
     # ------------------------------------------------------------------
-    level0_edges = socios_joined.select([
-        pl.col("_socio_id").alias("origem"),
-        pl.col("cnpj_formatado").alias("destino"),
-        pl.lit("socio_de").alias("tipo"),
-    ]).unique()
+    level0_edges = socios_joined.select(
+        [
+            pl.col("_socio_id").alias("origem"),
+            pl.col("cnpj_formatado").alias("destino"),
+            pl.lit("socio_de").alias("tipo"),
+        ]
+    ).unique()
 
     # ------------------------------------------------------------------
     # Level 1 edges: empresa → sibling empresa (via shared sócio)
@@ -107,34 +111,49 @@ def construir_grafo(
     # We find all pairs (empresa_a, empresa_b) where the same _socio_id
     # links both companies.
     # ------------------------------------------------------------------
-    self_join = socios_joined.select([
-        pl.col("_socio_id"),
-        pl.col("cnpj_formatado").alias("cnpj_a"),
-    ]).join(
-        socios_joined.select([
-            pl.col("_socio_id"),
-            pl.col("cnpj_formatado").alias("cnpj_b"),
-        ]),
-        on="_socio_id",
-        how="inner",
-    ).filter(pl.col("cnpj_a") != pl.col("cnpj_b"))
+    self_join = (
+        socios_joined.select(
+            [
+                pl.col("_socio_id"),
+                pl.col("cnpj_formatado").alias("cnpj_a"),
+            ]
+        )
+        .join(
+            socios_joined.select(
+                [
+                    pl.col("_socio_id"),
+                    pl.col("cnpj_formatado").alias("cnpj_b"),
+                ]
+            ),
+            on="_socio_id",
+            how="inner",
+        )
+        .filter(pl.col("cnpj_a") != pl.col("cnpj_b"))
+    )
 
     # Canonical direction: smaller cnpj is always "origem".
-    level1_edges = self_join.with_columns([
-        pl.when(pl.col("cnpj_a") < pl.col("cnpj_b"))
-        .then(pl.col("cnpj_a"))
-        .otherwise(pl.col("cnpj_b"))
-        .alias("origem"),
-
-        pl.when(pl.col("cnpj_a") < pl.col("cnpj_b"))
-        .then(pl.col("cnpj_b"))
-        .otherwise(pl.col("cnpj_a"))
-        .alias("destino"),
-    ]).select([
-        pl.col("origem"),
-        pl.col("destino"),
-        pl.lit("socio_compartilhado").alias("tipo"),
-    ]).unique()
+    level1_edges = (
+        self_join.with_columns(
+            [
+                pl.when(pl.col("cnpj_a") < pl.col("cnpj_b"))
+                .then(pl.col("cnpj_a"))
+                .otherwise(pl.col("cnpj_b"))
+                .alias("origem"),
+                pl.when(pl.col("cnpj_a") < pl.col("cnpj_b"))
+                .then(pl.col("cnpj_b"))
+                .otherwise(pl.col("cnpj_a"))
+                .alias("destino"),
+            ]
+        )
+        .select(
+            [
+                pl.col("origem"),
+                pl.col("destino"),
+                pl.lit("socio_compartilhado").alias("tipo"),
+            ]
+        )
+        .unique()
+    )
 
     all_edges = pl.concat([level0_edges, level1_edges])
 
@@ -142,18 +161,22 @@ def construir_grafo(
     # Build nodes from edges
     # ------------------------------------------------------------------
     # Empresa nodes
-    empresa_ids = empresas_lookup.select([
-        pl.col("cnpj_formatado").alias("id"),
-        pl.lit("empresa").alias("tipo"),
-        pl.col("razao_social").alias("label"),
-    ]).unique()
+    empresa_ids = empresas_lookup.select(
+        [
+            pl.col("cnpj_formatado").alias("id"),
+            pl.lit("empresa").alias("tipo"),
+            pl.col("razao_social").alias("label"),
+        ]
+    ).unique()
 
     # Sócio nodes
-    socio_nodes = socios_joined.select([
-        pl.col("_socio_id").alias("id"),
-        pl.lit("socio").alias("tipo"),
-        pl.col("nome_socio").alias("label"),
-    ]).unique()
+    socio_nodes = socios_joined.select(
+        [
+            pl.col("_socio_id").alias("id"),
+            pl.lit("socio").alias("tipo"),
+            pl.col("nome_socio").alias("label"),
+        ]
+    ).unique()
 
     all_nodes = pl.concat([empresa_ids, socio_nodes]).unique(subset=["id"])
 
@@ -162,26 +185,24 @@ def construir_grafo(
     # ------------------------------------------------------------------
     if len(all_nodes) > max_nos:
         # Count how many edges reference each node.
-        origem_counts = all_edges.group_by("origem").agg(
-            pl.len().alias("_degree")
-        ).rename({"origem": "id"})
-        destino_counts = all_edges.group_by("destino").agg(
-            pl.len().alias("_degree")
-        ).rename({"destino": "id"})
+        origem_counts = all_edges.group_by("origem").agg(pl.len().alias("_degree")).rename({"origem": "id"})
+        destino_counts = all_edges.group_by("destino").agg(pl.len().alias("_degree")).rename({"destino": "id"})
 
-        degree_df = pl.concat([origem_counts, destino_counts]).group_by("id").agg(
-            pl.col("_degree").sum().alias("_degree")
+        degree_df = (
+            pl.concat([origem_counts, destino_counts]).group_by("id").agg(pl.col("_degree").sum().alias("_degree"))
         )
 
-        ranked = all_nodes.join(degree_df, on="id", how="left").with_columns(
-            pl.col("_degree").fill_null(0)
-        ).sort("_degree", descending=True).head(max_nos).drop("_degree")
+        ranked = (
+            all_nodes.join(degree_df, on="id", how="left")
+            .with_columns(pl.col("_degree").fill_null(0))
+            .sort("_degree", descending=True)
+            .head(max_nos)
+            .drop("_degree")
+        )
 
         kept_ids: set[str] = set(ranked["id"].to_list())
         all_nodes = ranked
-        all_edges = all_edges.filter(
-            pl.col("origem").is_in(kept_ids) & pl.col("destino").is_in(kept_ids)
-        )
+        all_edges = all_edges.filter(pl.col("origem").is_in(kept_ids) & pl.col("destino").is_in(kept_ids))
 
     return (
         all_nodes.select(["id", "tipo", "label"]),

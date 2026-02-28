@@ -61,9 +61,13 @@ def apply_hmac_to_df(df: pl.DataFrame, cpf_col: str, salt: str) -> pl.DataFrame:
         New DataFrame identical to *df* except the CPF column is replaced by
         ``cpf_hmac``.
     """
-    hmac_series = df[cpf_col].map_elements(
-        lambda v: hmac_sha256_cpf(v, salt) if v is not None else None,
-        return_dtype=pl.Utf8,
-    ).alias("cpf_hmac")
+    hmac_series = (
+        df[cpf_col]
+        .map_elements(
+            lambda v: hmac_sha256_cpf(v, salt) if v is not None else None,
+            return_dtype=pl.Utf8,
+        )
+        .alias("cpf_hmac")
+    )
 
     return df.drop(cpf_col).with_columns(hmac_series)

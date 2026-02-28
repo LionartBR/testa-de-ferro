@@ -30,7 +30,7 @@
 #   - fk_socio is null when the alert is at company level (not sócio level).
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import polars as pl
@@ -84,17 +84,13 @@ def detectar_alertas_batch(
           pk_alerta, fk_fornecedor, fk_socio, tipo_alerta, severidade,
           descricao, evidencia, detectado_em.
     """
-    detectado_em = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+    detectado_em = datetime.now(tz=UTC).replace(tzinfo=None)
     rows: list[dict[str, object]] = []
 
     rows.extend(_socio_servidor_publico_batch(empresas_df, socios_df, detectado_em))
-    rows.extend(_empresa_sancionada_contratando_batch(
-        empresas_df, contratos_df, sancoes_df, detectado_em
-    ))
+    rows.extend(_empresa_sancionada_contratando_batch(empresas_df, contratos_df, sancoes_df, detectado_em))
     if doacoes_df is not None and not doacoes_df.is_empty():
-        rows.extend(_doacao_para_contratante_batch(
-            empresas_df, contratos_df, doacoes_df, detectado_em
-        ))
+        rows.extend(_doacao_para_contratante_batch(empresas_df, contratos_df, doacoes_df, detectado_em))
     rows.extend(_socio_sancionado_em_outra_batch(empresas_df, socios_df, detectado_em))
 
     if not rows:
@@ -102,16 +98,18 @@ def detectar_alertas_batch(
 
     result = pl.DataFrame(rows)
     result = result.with_row_index(name="pk_alerta", offset=1)
-    return result.select([
-        "pk_alerta",
-        "fk_fornecedor",
-        "fk_socio",
-        "tipo_alerta",
-        "severidade",
-        "descricao",
-        "evidencia",
-        "detectado_em",
-    ])
+    return result.select(
+        [
+            "pk_alerta",
+            "fk_fornecedor",
+            "fk_socio",
+            "tipo_alerta",
+            "severidade",
+            "descricao",
+            "evidencia",
+            "detectado_em",
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -135,14 +133,14 @@ def _socio_servidor_publico_batch(
         return []
 
     # Map cnpj_basico → pk_fornecedor.
-    basico_to_pk = empresas_df.select([
-        pl.col("cnpj_basico").str.zfill(8).alias("cnpj_basico"),
-        pl.col("pk_fornecedor"),
-    ])
-
-    servidores_norm = servidores.with_columns(
-        pl.col("cnpj_basico").str.zfill(8)
+    basico_to_pk = empresas_df.select(
+        [
+            pl.col("cnpj_basico").str.zfill(8).alias("cnpj_basico"),
+            pl.col("pk_fornecedor"),
+        ]
     )
+
+    servidores_norm = servidores.with_columns(pl.col("cnpj_basico").str.zfill(8))
 
     joined = servidores_norm.join(basico_to_pk, on="cnpj_basico", how="inner")
     if joined.is_empty():
@@ -163,15 +161,17 @@ def _socio_servidor_publico_batch(
         if orgao:
             evidencia += f", orgao={orgao}"
 
-        rows.append({
-            "fk_fornecedor": row["pk_fornecedor"],
-            "fk_socio": row[pk_socio_col] if pk_socio_col else None,
-            "tipo_alerta": _SOCIO_SERVIDOR_PUBLICO,
-            "severidade": _GRAVISSIMO,
-            "descricao": descricao,
-            "evidencia": evidencia,
-            "detectado_em": detectado_em,
-        })
+        rows.append(
+            {
+                "fk_fornecedor": row["pk_fornecedor"],
+                "fk_socio": row[pk_socio_col] if pk_socio_col else None,
+                "tipo_alerta": _SOCIO_SERVIDOR_PUBLICO,
+                "severidade": _GRAVISSIMO,
+                "descricao": descricao,
+                "evidencia": evidencia,
+                "detectado_em": detectado_em,
+            }
+        )
     return rows
 
 
@@ -187,30 +187,19 @@ def _empresa_sancionada_contratando_batch(
     if "data_fim" not in sancoes_df.columns:
         return []
 
-    today = datetime.now(tz=timezone.utc).date()
+    today = datetime.now(tz=UTC).date()
 
     # Active sanction: data_fim is null (indefinite) OR data_fim > today.
-    vigentes = sancoes_df.filter(
-        pl.col("data_fim").is_null()
-        | (pl.col("data_fim").cast(pl.Date) > pl.lit(today))
-    )
+    vigentes = sancoes_df.filter(pl.col("data_fim").is_null() | (pl.col("data_fim").cast(pl.Date) > pl.lit(today)))
 
     if vigentes.is_empty():
         return []
 
     # Count active sanctions per fornecedor.
-    sancoes_count = (
-        vigentes
-        .group_by("fk_fornecedor")
-        .agg(pl.len().alias("qtd_vigentes"))
-    )
+    sancoes_count = vigentes.group_by("fk_fornecedor").agg(pl.len().alias("qtd_vigentes"))
 
     # Count contracts per fornecedor.
-    contratos_count = (
-        contratos_df
-        .group_by("fk_fornecedor")
-        .agg(pl.len().alias("qtd_contratos"))
-    )
+    contratos_count = contratos_df.group_by("fk_fornecedor").agg(pl.len().alias("qtd_contratos"))
 
     # Intersection: fornecedores with both active sanctions AND contracts.
     both = sancoes_count.join(contratos_count, on="fk_fornecedor", how="inner")
@@ -223,21 +212,20 @@ def _empresa_sancionada_contratando_batch(
 
     rows: list[dict[str, object]] = []
     for row in both.iter_rows(named=True):
-        rows.append({
-            "fk_fornecedor": row["fk_fornecedor"],
-            "fk_socio": None,
-            "tipo_alerta": _EMPRESA_SANCIONADA_CONTRATANDO,
-            "severidade": _GRAVISSIMO,
-            "descricao": (
-                f"Empresa com {row['qtd_vigentes']} sancao(oes) vigente(s) "
-                f"e {row['qtd_contratos']} contrato(s) ativo(s)"
-            ),
-            "evidencia": (
-                f"sancoes_vigentes={row['qtd_vigentes']}, "
-                f"qtd_contratos={row['qtd_contratos']}"
-            ),
-            "detectado_em": detectado_em,
-        })
+        rows.append(
+            {
+                "fk_fornecedor": row["fk_fornecedor"],
+                "fk_socio": None,
+                "tipo_alerta": _EMPRESA_SANCIONADA_CONTRATANDO,
+                "severidade": _GRAVISSIMO,
+                "descricao": (
+                    f"Empresa com {row['qtd_vigentes']} sancao(oes) vigente(s) "
+                    f"e {row['qtd_contratos']} contrato(s) ativo(s)"
+                ),
+                "evidencia": (f"sancoes_vigentes={row['qtd_vigentes']}, qtd_contratos={row['qtd_contratos']}"),
+                "detectado_em": detectado_em,
+            }
+        )
     return rows
 
 
@@ -257,23 +245,16 @@ def _doacao_para_contratante_batch(
     contrato_threshold = float(_CONTRATO_THRESHOLD_DOACAO)
 
     # Material donations: valor > R$10k.
-    materiais = doacoes_df.filter(
-        pl.col("valor").cast(pl.Float64) > doacao_threshold
-    )
+    materiais = doacoes_df.filter(pl.col("valor").cast(pl.Float64) > doacao_threshold)
 
     if materiais.is_empty():
         return []
 
-    materiais_count = (
-        materiais
-        .group_by("fk_fornecedor")
-        .agg(pl.len().alias("qtd_doacoes_materiais"))
-    )
+    materiais_count = materiais.group_by("fk_fornecedor").agg(pl.len().alias("qtd_doacoes_materiais"))
 
     # Total contract value per fornecedor.
     contrato_totais = (
-        contratos_df
-        .group_by("fk_fornecedor")
+        contratos_df.group_by("fk_fornecedor")
         .agg(pl.col("valor").cast(pl.Float64).sum().alias("valor_total_contratos"))
         .filter(pl.col("valor_total_contratos") > contrato_threshold)
     )
@@ -289,21 +270,23 @@ def _doacao_para_contratante_batch(
 
     rows: list[dict[str, object]] = []
     for row in both.iter_rows(named=True):
-        rows.append({
-            "fk_fornecedor": row["fk_fornecedor"],
-            "fk_socio": None,
-            "tipo_alerta": _DOACAO_PARA_CONTRATANTE,
-            "severidade": _GRAVE,
-            "descricao": (
-                f"{row['qtd_doacoes_materiais']} doacao(oes) material(is) "
-                f"com contratos totalizando R${row['valor_total_contratos']:,.2f}"
-            ),
-            "evidencia": (
-                f"doacoes_materiais={row['qtd_doacoes_materiais']}, "
-                f"valor_total_contratos={row['valor_total_contratos']}"
-            ),
-            "detectado_em": detectado_em,
-        })
+        rows.append(
+            {
+                "fk_fornecedor": row["fk_fornecedor"],
+                "fk_socio": None,
+                "tipo_alerta": _DOACAO_PARA_CONTRATANTE,
+                "severidade": _GRAVE,
+                "descricao": (
+                    f"{row['qtd_doacoes_materiais']} doacao(oes) material(is) "
+                    f"com contratos totalizando R${row['valor_total_contratos']:,.2f}"
+                ),
+                "evidencia": (
+                    f"doacoes_materiais={row['qtd_doacoes_materiais']}, "
+                    f"valor_total_contratos={row['valor_total_contratos']}"
+                ),
+                "detectado_em": detectado_em,
+            }
+        )
     return rows
 
 
@@ -322,14 +305,14 @@ def _socio_sancionado_em_outra_batch(
     if sancionados.is_empty():
         return []
 
-    basico_to_pk = empresas_df.select([
-        pl.col("cnpj_basico").str.zfill(8).alias("cnpj_basico"),
-        pl.col("pk_fornecedor"),
-    ])
-
-    sancionados_norm = sancionados.with_columns(
-        pl.col("cnpj_basico").str.zfill(8)
+    basico_to_pk = empresas_df.select(
+        [
+            pl.col("cnpj_basico").str.zfill(8).alias("cnpj_basico"),
+            pl.col("pk_fornecedor"),
+        ]
     )
+
+    sancionados_norm = sancionados.with_columns(pl.col("cnpj_basico").str.zfill(8))
 
     joined = sancionados_norm.join(basico_to_pk, on="cnpj_basico", how="inner")
     if joined.is_empty():
@@ -343,27 +326,31 @@ def _socio_sancionado_em_outra_batch(
         if "cpf_hmac" in row and row["cpf_hmac"]:
             evidencia = f"socio_cpf_hmac={row['cpf_hmac']}, " + evidencia
 
-        rows.append({
-            "fk_fornecedor": row["pk_fornecedor"],
-            "fk_socio": row[pk_socio_col] if pk_socio_col else None,
-            "tipo_alerta": _SOCIO_SANCIONADO_EM_OUTRA,
-            "severidade": _GRAVE,
-            "descricao": f"Socio {row['nome_socio']} e socio de outra empresa sancionada",
-            "evidencia": evidencia,
-            "detectado_em": detectado_em,
-        })
+        rows.append(
+            {
+                "fk_fornecedor": row["pk_fornecedor"],
+                "fk_socio": row[pk_socio_col] if pk_socio_col else None,
+                "tipo_alerta": _SOCIO_SANCIONADO_EM_OUTRA,
+                "severidade": _GRAVE,
+                "descricao": f"Socio {row['nome_socio']} e socio de outra empresa sancionada",
+                "evidencia": evidencia,
+                "detectado_em": detectado_em,
+            }
+        )
     return rows
 
 
 def _empty_alerta_df() -> pl.DataFrame:
     """Return an empty DataFrame with the fato_alerta_critico schema."""
-    return pl.DataFrame({
-        "pk_alerta": pl.Series([], dtype=pl.Int64),
-        "fk_fornecedor": pl.Series([], dtype=pl.Int64),
-        "fk_socio": pl.Series([], dtype=pl.Int64),
-        "tipo_alerta": pl.Series([], dtype=pl.Utf8),
-        "severidade": pl.Series([], dtype=pl.Utf8),
-        "descricao": pl.Series([], dtype=pl.Utf8),
-        "evidencia": pl.Series([], dtype=pl.Utf8),
-        "detectado_em": pl.Series([], dtype=pl.Datetime),
-    })
+    return pl.DataFrame(
+        {
+            "pk_alerta": pl.Series([], dtype=pl.Int64),
+            "fk_fornecedor": pl.Series([], dtype=pl.Int64),
+            "fk_socio": pl.Series([], dtype=pl.Int64),
+            "tipo_alerta": pl.Series([], dtype=pl.Utf8),
+            "severidade": pl.Series([], dtype=pl.Utf8),
+            "descricao": pl.Series([], dtype=pl.Utf8),
+            "evidencia": pl.Series([], dtype=pl.Utf8),
+            "detectado_em": pl.Series([], dtype=pl.Datetime),
+        }
+    )

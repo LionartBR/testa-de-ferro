@@ -30,12 +30,14 @@ def _make_servidores(
     orgaos: list[str | None],
 ) -> pl.DataFrame:
     """Helper: build a minimal servidores DataFrame for testing."""
-    return pl.DataFrame({
-        "nome": nomes,
-        "digitos_visiveis": digitos,
-        "orgao_lotacao": orgaos,
-        "cargo": ["ANALISTA"] * len(nomes),
-    })
+    return pl.DataFrame(
+        {
+            "nome": nomes,
+            "digitos_visiveis": digitos,
+            "orgao_lotacao": orgaos,
+            "cargo": ["ANALISTA"] * len(nomes),
+        }
+    )
 
 
 def test_match_por_nome_e_digitos() -> None:

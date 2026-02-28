@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-_SHARE_TOKEN = "YggdBLfdninEJX9"
+_SHARE_TOKEN = "YggdBLfdninEJX9"  # noqa: S105  — public share token, not a password
 _WEBDAV_BASE = "https://arquivos.receitafederal.gov.br/public.php/webdav"
 
 
@@ -65,7 +65,11 @@ def download_cnpj(url: str, raw_dir: Path, timeout: int = 300) -> Path:
     zip_path = raw_dir / zip_name
 
     with httpx.stream(
-        "GET", actual_url, timeout=timeout, follow_redirects=True, headers=headers,
+        "GET",
+        actual_url,
+        timeout=timeout,
+        follow_redirects=True,
+        headers=headers,
     ) as response:
         response.raise_for_status()
         with zip_path.open("wb") as file_handle:

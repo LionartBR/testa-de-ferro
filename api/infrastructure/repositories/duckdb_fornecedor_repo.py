@@ -69,7 +69,9 @@ class DuckDBFornecedorRepo:
                 municipio=str(row[8] or ""),
                 uf=str(row[9] or ""),
                 cep=str(row[10] or ""),
-            ) if row[7] else None,
+            )
+            if row[7]
+            else None,
             situacao=SituacaoCadastral(str(row[11])) if row[11] else SituacaoCadastral.ATIVA,
             total_contratos=int(row[16]) if row[16] else 0,
             valor_total_contratos=Decimal(str(row[17])) if row[17] else Decimal("0"),

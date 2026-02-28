@@ -58,25 +58,27 @@ def test_parse_pncp_fk_columns_sao_null() -> None:
 def test_validate_trunca_objeto_a_1000_chars() -> None:
     """objeto field is truncated to 1000 characters."""
     long_objeto = "X" * 1500
-    df = pl.DataFrame({
-        "pk_contrato": [1],
-        "num_licitacao": ["C-001"],
-        "cnpj_fornecedor": ["11.222.333/0001-81"],
-        "codigo_orgao": ["00394460000141"],
-        "nome_orgao": [None],
-        "poder_orgao": [None],
-        "esfera_orgao": [None],
-        "modalidade_nome": [None],
-        "modalidade_codigo": [None],
-        "valor": [50000.0],
-        "objeto": [long_objeto],
-        "data_assinatura": pl.Series([None], dtype=pl.Date),
-        "data_vigencia": pl.Series([None], dtype=pl.Date),
-        "fk_fornecedor": pl.Series([None], dtype=pl.Int64),
-        "fk_orgao": pl.Series([None], dtype=pl.Int64),
-        "fk_tempo": pl.Series([None], dtype=pl.Int64),
-        "fk_modalidade": pl.Series([None], dtype=pl.Int64),
-    })
+    df = pl.DataFrame(
+        {
+            "pk_contrato": [1],
+            "num_licitacao": ["C-001"],
+            "cnpj_fornecedor": ["11.222.333/0001-81"],
+            "codigo_orgao": ["00394460000141"],
+            "nome_orgao": [None],
+            "poder_orgao": [None],
+            "esfera_orgao": [None],
+            "modalidade_nome": [None],
+            "modalidade_codigo": [None],
+            "valor": [50000.0],
+            "objeto": [long_objeto],
+            "data_assinatura": pl.Series([None], dtype=pl.Date),
+            "data_vigencia": pl.Series([None], dtype=pl.Date),
+            "fk_fornecedor": pl.Series([None], dtype=pl.Int64),
+            "fk_orgao": pl.Series([None], dtype=pl.Int64),
+            "fk_tempo": pl.Series([None], dtype=pl.Int64),
+            "fk_modalidade": pl.Series([None], dtype=pl.Int64),
+        }
+    )
     result = validate_contratos(df)
 
     assert result["objeto"][0] is not None
@@ -85,25 +87,27 @@ def test_validate_trunca_objeto_a_1000_chars() -> None:
 
 def test_validate_remove_duplicatas_por_num_licitacao() -> None:
     """Dedup by num_licitacao keeps first occurrence."""
-    df = pl.DataFrame({
-        "pk_contrato": [1, 2],
-        "num_licitacao": ["C-DUP", "C-DUP"],
-        "cnpj_fornecedor": ["11.222.333/0001-81", "11.222.333/0001-81"],
-        "codigo_orgao": ["ORG1", "ORG1"],
-        "nome_orgao": [None, None],
-        "poder_orgao": [None, None],
-        "esfera_orgao": [None, None],
-        "modalidade_nome": [None, None],
-        "modalidade_codigo": [None, None],
-        "valor": [1000.0, 2000.0],
-        "objeto": ["Objeto A", "Objeto B"],
-        "data_assinatura": pl.Series([None, None], dtype=pl.Date),
-        "data_vigencia": pl.Series([None, None], dtype=pl.Date),
-        "fk_fornecedor": pl.Series([None, None], dtype=pl.Int64),
-        "fk_orgao": pl.Series([None, None], dtype=pl.Int64),
-        "fk_tempo": pl.Series([None, None], dtype=pl.Int64),
-        "fk_modalidade": pl.Series([None, None], dtype=pl.Int64),
-    })
+    df = pl.DataFrame(
+        {
+            "pk_contrato": [1, 2],
+            "num_licitacao": ["C-DUP", "C-DUP"],
+            "cnpj_fornecedor": ["11.222.333/0001-81", "11.222.333/0001-81"],
+            "codigo_orgao": ["ORG1", "ORG1"],
+            "nome_orgao": [None, None],
+            "poder_orgao": [None, None],
+            "esfera_orgao": [None, None],
+            "modalidade_nome": [None, None],
+            "modalidade_codigo": [None, None],
+            "valor": [1000.0, 2000.0],
+            "objeto": ["Objeto A", "Objeto B"],
+            "data_assinatura": pl.Series([None, None], dtype=pl.Date),
+            "data_vigencia": pl.Series([None, None], dtype=pl.Date),
+            "fk_fornecedor": pl.Series([None, None], dtype=pl.Int64),
+            "fk_orgao": pl.Series([None, None], dtype=pl.Int64),
+            "fk_tempo": pl.Series([None, None], dtype=pl.Int64),
+            "fk_modalidade": pl.Series([None, None], dtype=pl.Int64),
+        }
+    )
     result = validate_contratos(df)
 
     assert len(result) == 1
@@ -112,25 +116,27 @@ def test_validate_remove_duplicatas_por_num_licitacao() -> None:
 
 def test_validate_rejeita_valor_negativo() -> None:
     """Rows with negative valor are dropped."""
-    df = pl.DataFrame({
-        "pk_contrato": [1, 2],
-        "num_licitacao": ["C-001", "C-002"],
-        "cnpj_fornecedor": ["11.222.333/0001-81", "22.333.444/0001-52"],
-        "codigo_orgao": ["ORG1", "ORG2"],
-        "nome_orgao": [None, None],
-        "poder_orgao": [None, None],
-        "esfera_orgao": [None, None],
-        "modalidade_nome": [None, None],
-        "modalidade_codigo": [None, None],
-        "valor": [-500.0, 1000.0],
-        "objeto": ["Objeto A", "Objeto B"],
-        "data_assinatura": pl.Series([None, None], dtype=pl.Date),
-        "data_vigencia": pl.Series([None, None], dtype=pl.Date),
-        "fk_fornecedor": pl.Series([None, None], dtype=pl.Int64),
-        "fk_orgao": pl.Series([None, None], dtype=pl.Int64),
-        "fk_tempo": pl.Series([None, None], dtype=pl.Int64),
-        "fk_modalidade": pl.Series([None, None], dtype=pl.Int64),
-    })
+    df = pl.DataFrame(
+        {
+            "pk_contrato": [1, 2],
+            "num_licitacao": ["C-001", "C-002"],
+            "cnpj_fornecedor": ["11.222.333/0001-81", "22.333.444/0001-52"],
+            "codigo_orgao": ["ORG1", "ORG2"],
+            "nome_orgao": [None, None],
+            "poder_orgao": [None, None],
+            "esfera_orgao": [None, None],
+            "modalidade_nome": [None, None],
+            "modalidade_codigo": [None, None],
+            "valor": [-500.0, 1000.0],
+            "objeto": ["Objeto A", "Objeto B"],
+            "data_assinatura": pl.Series([None, None], dtype=pl.Date),
+            "data_vigencia": pl.Series([None, None], dtype=pl.Date),
+            "fk_fornecedor": pl.Series([None, None], dtype=pl.Int64),
+            "fk_orgao": pl.Series([None, None], dtype=pl.Int64),
+            "fk_tempo": pl.Series([None, None], dtype=pl.Int64),
+            "fk_modalidade": pl.Series([None, None], dtype=pl.Int64),
+        }
+    )
     result = validate_contratos(df)
 
     assert len(result) == 1

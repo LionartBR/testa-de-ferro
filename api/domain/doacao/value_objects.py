@@ -8,6 +8,7 @@ from decimal import Decimal
 @dataclass(frozen=True)
 class ValorDoacao:
     """Valor monetario em Decimal. Nunca float, nunca negativo."""
+
     valor: Decimal
 
     def __post_init__(self) -> None:
@@ -18,6 +19,7 @@ class ValorDoacao:
 @dataclass(frozen=True)
 class AnoCampanha:
     """Ano de eleicao (2018, 2020, 2022, ...)."""
+
     valor: int
 
     def __post_init__(self) -> None:

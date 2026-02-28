@@ -90,20 +90,16 @@ def parse_empresas(raw_path: Path) -> pl.DataFrame:
         for v in (raw["CNPJ_ORDEM"].to_list() if "CNPJ_ORDEM" in raw.columns else [""] * n)
     ]
     dv_list = [
-        v.strip().zfill(2) if v else "00"
-        for v in (raw["CNPJ_DV"].to_list() if "CNPJ_DV" in raw.columns else [""] * n)
+        v.strip().zfill(2) if v else "00" for v in (raw["CNPJ_DV"].to_list() if "CNPJ_DV" in raw.columns else [""] * n)
     ]
 
     cnpj_list = [
-        f"{b[:2]}.{b[2:5]}.{b[5:8]}/{o}-{d}"
-        for b, o, d in zip(basico_list, ordem_list, dv_list)
+        f"{b[:2]}.{b[2:5]}.{b[5:8]}/{o}-{d}" for b, o, d in zip(basico_list, ordem_list, dv_list, strict=False)
     ]
 
     # Map numeric situacao codes to human-readable labels.
     if "SITUACAO_CADASTRAL" in raw.columns:
-        situacao_list: list[str | None] = [
-            _map_situacao(v) for v in raw["SITUACAO_CADASTRAL"].to_list()
-        ]
+        situacao_list: list[str | None] = [_map_situacao(v) for v in raw["SITUACAO_CADASTRAL"].to_list()]
     else:
         situacao_list = [None] * n
 
@@ -124,11 +120,7 @@ def parse_empresas(raw_path: Path) -> pl.DataFrame:
     # Parse data_inicio_atividade from YYYYMMDD string to date.
     data_series: pl.Series
     if "DATA_INICIO_ATIVIDADE" in raw.columns:
-        data_series = (
-            raw["DATA_INICIO_ATIVIDADE"]
-            .str.strip_chars()
-            .str.to_date(format="%Y%m%d", strict=False)
-        )
+        data_series = raw["DATA_INICIO_ATIVIDADE"].str.strip_chars().str.to_date(format="%Y%m%d", strict=False)
     else:
         data_series = pl.Series("data_abertura", [None] * n, dtype=pl.Date)
 

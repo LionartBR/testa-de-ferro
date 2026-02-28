@@ -16,14 +16,17 @@ class DuckDBContratoRepo:
         self._conn = conn
 
     def listar_por_fornecedor(self, cnpj: CNPJ) -> list[Contrato]:
-        rows = self._conn.execute("""
+        rows = self._conn.execute(
+            """
             SELECT fc.valor, fc.objeto, fc.num_licitacao,
                    fc.data_assinatura, fc.data_vigencia, dorg.codigo
             FROM fato_contrato fc
             JOIN dim_fornecedor df ON fc.fk_fornecedor = df.pk_fornecedor
             JOIN dim_orgao dorg ON fc.fk_orgao = dorg.pk_orgao
             WHERE df.cnpj = ?
-        """, [cnpj.formatado]).fetchall()
+        """,
+            [cnpj.formatado],
+        ).fetchall()
         return [self._hidratar(r, cnpj) for r in rows]
 
     def listar(
@@ -49,7 +52,8 @@ class DuckDBContratoRepo:
             where = "WHERE " + " AND ".join(conditions)
 
         params.extend([limit, offset])
-        rows = self._conn.execute(f"""
+        rows = self._conn.execute(
+            f"""
             SELECT fc.valor, fc.objeto, fc.num_licitacao,
                    fc.data_assinatura, fc.data_vigencia, dorg.codigo, df.cnpj
             FROM fato_contrato fc
@@ -58,7 +62,9 @@ class DuckDBContratoRepo:
             {where}
             ORDER BY fc.data_assinatura DESC NULLS LAST
             LIMIT ? OFFSET ?
-        """, params).fetchall()  # noqa: S608
+        """,  # noqa: S608
+            params,
+        ).fetchall()
 
         return [self._hidratar_com_cnpj(r) for r in rows]
 

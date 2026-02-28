@@ -13,9 +13,11 @@ from fastapi.testclient import TestClient
 def rate_limited_client(test_db: duckdb.DuckDBPyConnection) -> Generator[TestClient, None, None]:
     """Client com rate limit ativo (3 req/min para teste rapido)."""
     from api.infrastructure import duckdb_connection
+
     duckdb_connection.set_connection(test_db)
 
     from api.infrastructure.config import get_settings
+
     get_settings.cache_clear()
 
     old_val = os.environ.get("API_RATE_LIMIT_PER_MINUTE", "0")
@@ -23,6 +25,7 @@ def rate_limited_client(test_db: duckdb.DuckDBPyConnection) -> Generator[TestCli
     get_settings.cache_clear()
 
     from api.interfaces.api.main import app
+
     with TestClient(app) as c:
         yield c
 

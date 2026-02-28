@@ -13,6 +13,7 @@ from api.interfaces.api.middleware.rate_limit import RateLimitMiddleware
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from api.infrastructure.duckdb_connection import get_connection
+
     get_connection()  # valida conexao no startup
     yield
 

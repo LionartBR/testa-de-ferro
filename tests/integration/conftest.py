@@ -122,12 +122,15 @@ def test_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
 def client(test_db: duckdb.DuckDBPyConnection) -> Generator[TestClient, None, None]:
     """TestClient do FastAPI com DuckDB in-memory injetado."""
     from api.infrastructure import duckdb_connection
+
     duckdb_connection.set_connection(test_db)
 
     # Limpar cache de settings para pegar API_RATE_LIMIT_PER_MINUTE=0
     from api.infrastructure.config import get_settings
+
     get_settings.cache_clear()
 
     from api.interfaces.api.main import app
+
     with TestClient(app) as c:
         yield c

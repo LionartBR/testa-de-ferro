@@ -15,13 +15,16 @@ class DuckDBSancaoRepo:
         self._conn = conn
 
     def listar_por_fornecedor(self, cnpj: CNPJ) -> list[Sancao]:
-        rows = self._conn.execute("""
+        rows = self._conn.execute(
+            """
             SELECT ds.tipo_sancao, ds.orgao_sancionador, ds.motivo,
                    ds.data_inicio, ds.data_fim
             FROM dim_sancao ds
             JOIN dim_fornecedor df ON ds.fk_fornecedor = df.pk_fornecedor
             WHERE df.cnpj = ?
-        """, [cnpj.formatado]).fetchall()
+        """,
+            [cnpj.formatado],
+        ).fetchall()
         return [self._hidratar(r) for r in rows]
 
     def _hidratar(self, row: tuple) -> Sancao:  # type: ignore[type-arg]

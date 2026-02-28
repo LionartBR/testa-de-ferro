@@ -21,23 +21,28 @@ def get_dashboard_orgao(
 
     # Verificar se orgao existe
     orgao = conn.execute(
-        "SELECT nome, sigla FROM dim_orgao WHERE codigo = ?", [codigo],
+        "SELECT nome, sigla FROM dim_orgao WHERE codigo = ?",
+        [codigo],
     ).fetchone()
     if orgao is None:
         raise HTTPException(status_code=404, detail="Orgao nao encontrado")
 
     # Resumo
-    resumo = conn.execute("""
+    resumo = conn.execute(
+        """
         SELECT count(*) AS qtd_contratos,
                COALESCE(sum(fc.valor), 0) AS total_contratado,
                count(DISTINCT fc.fk_fornecedor) AS qtd_fornecedores
         FROM fato_contrato fc
         JOIN dim_orgao dorg ON fc.fk_orgao = dorg.pk_orgao
         WHERE dorg.codigo = ?
-    """, [codigo]).fetchone()
+    """,
+        [codigo],
+    ).fetchone()
 
     # Top 10 fornecedores por valor
-    top_fornecedores = conn.execute("""
+    top_fornecedores = conn.execute(
+        """
         SELECT df.cnpj, df.razao_social, df.score_risco,
                sum(fc.valor) AS valor_total,
                count(*) AS qtd_contratos
@@ -48,7 +53,9 @@ def get_dashboard_orgao(
         GROUP BY df.cnpj, df.razao_social, df.score_risco
         ORDER BY valor_total DESC
         LIMIT 10
-    """, [codigo]).fetchall()
+    """,
+        [codigo],
+    ).fetchall()
 
     return {
         "orgao": {"nome": str(orgao[0]), "sigla": str(orgao[1]) if orgao[1] else None, "codigo": codigo},

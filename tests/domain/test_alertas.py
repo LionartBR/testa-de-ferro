@@ -52,9 +52,11 @@ def _doacao(valor: Decimal = Decimal("15000")) -> DoacaoEleitoral:
 
 # ---------- SOCIO_SERVIDOR_PUBLICO ----------
 
+
 def test_alerta_socio_servidor_publico_gera_gravissimo():
-    socio = Socio(cpf_hmac="abc123", nome="Joao da Silva", is_servidor_publico=True,
-                  orgao_lotacao="Ministerio da Saude")
+    socio = Socio(
+        cpf_hmac="abc123", nome="Joao da Silva", is_servidor_publico=True, orgao_lotacao="Ministerio da Saude"
+    )
     alertas = detectar_alertas(
         fornecedor=_fornecedor(),
         socios=[socio],
@@ -97,9 +99,9 @@ def test_multiplos_socios_servidores_geram_alerta_para_cada():
 
 # ---------- EMPRESA_SANCIONADA_CONTRATANDO ----------
 
+
 def test_empresa_sancionada_vigente_com_contrato_gera_gravissimo():
-    sancao = Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU",
-                    data_inicio=date(2023, 1, 1), data_fim=None)
+    sancao = Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU", data_inicio=date(2023, 1, 1), data_fim=None)
     contrato = _contrato()
     alertas = detectar_alertas(
         fornecedor=_fornecedor(),
@@ -115,8 +117,9 @@ def test_empresa_sancionada_vigente_com_contrato_gera_gravissimo():
 
 def test_sancao_expirada_nao_gera_alerta_critico():
     """Sancao expirada -> indicador SANCAO_HISTORICA (score), nunca alerta."""
-    sancao = Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU",
-                    data_inicio=date(2020, 1, 1), data_fim=date(2022, 12, 31))
+    sancao = Sancao(
+        tipo=TipoSancao.CEIS, orgao_sancionador="CGU", data_inicio=date(2020, 1, 1), data_fim=date(2022, 12, 31)
+    )
     alertas = detectar_alertas(
         fornecedor=_fornecedor(),
         socios=[],
@@ -129,8 +132,7 @@ def test_sancao_expirada_nao_gera_alerta_critico():
 
 def test_empresa_sancionada_sem_contrato_nao_gera_alerta():
     """Sem contrato = nao esta 'contratando', logo sem alerta."""
-    sancao = Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU",
-                    data_inicio=date(2023, 1, 1), data_fim=None)
+    sancao = Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU", data_inicio=date(2023, 1, 1), data_fim=None)
     alertas = detectar_alertas(
         fornecedor=_fornecedor(),
         socios=[],
@@ -153,6 +155,7 @@ def test_sem_socios_e_sem_sancoes_retorna_lista_vazia():
 
 
 # ---------- DOACAO_PARA_CONTRATANTE ----------
+
 
 def test_doacao_material_com_contrato_alto_gera_alerta():
     """Doacao > R$10k + contratos > R$500k -> alerta GRAVE."""
@@ -209,6 +212,7 @@ def test_doacao_sem_contratos_nao_gera_alerta():
 
 
 # ---------- SOCIO_SANCIONADO_EM_OUTRA ----------
+
 
 def test_socio_sancionado_gera_alerta_grave():
     """Socio que e socio de outra empresa sancionada -> alerta GRAVE."""

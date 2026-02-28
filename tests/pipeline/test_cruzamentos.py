@@ -30,18 +30,22 @@ def _make_socios(
     nomes: list[str],
 ) -> pl.DataFrame:
     """Helper: build a minimal socios DataFrame."""
-    return pl.DataFrame({
-        "cnpj_basico": cnpj_basicos,
-        "nome_socio": nomes,
-    })
+    return pl.DataFrame(
+        {
+            "cnpj_basico": cnpj_basicos,
+            "nome_socio": nomes,
+        }
+    )
 
 
 def _make_sancoes(cnpj_basicos: list[str]) -> pl.DataFrame:
     """Helper: build a minimal sancoes DataFrame using cnpj_basico."""
-    return pl.DataFrame({
-        "cnpj_basico": cnpj_basicos,
-        "tipo_sancao": ["CEIS"] * len(cnpj_basicos),
-    })
+    return pl.DataFrame(
+        {
+            "cnpj_basico": cnpj_basicos,
+            "tipo_sancao": ["CEIS"] * len(cnpj_basicos),
+        }
+    )
 
 
 def test_socio_em_empresa_sancionada_marcado() -> None:
@@ -75,10 +79,12 @@ def test_socio_sem_sancao_nao_marcado() -> None:
         nomes=["MARIA OLIVEIRA"],
     )
     # Empty sancoes — no company is sanctioned.
-    sancoes = pl.DataFrame({
-        "cnpj_basico": pl.Series([], dtype=pl.Utf8),
-        "tipo_sancao": pl.Series([], dtype=pl.Utf8),
-    })
+    sancoes = pl.DataFrame(
+        {
+            "cnpj_basico": pl.Series([], dtype=pl.Utf8),
+            "tipo_sancao": pl.Series([], dtype=pl.Utf8),
+        }
+    )
 
     result = enriquecer_socios(socios, sancoes, empresas)
 
@@ -96,10 +102,12 @@ def test_qtd_empresas_governo_contada() -> None:
         cnpj_basicos=["11111111", "22222222", "33333333", "11111111"],
         nomes=["CARLOS MENDES", "CARLOS MENDES", "CARLOS MENDES", "ANA FARIAS"],
     )
-    sancoes = pl.DataFrame({
-        "cnpj_basico": pl.Series([], dtype=pl.Utf8),
-        "tipo_sancao": pl.Series([], dtype=pl.Utf8),
-    })
+    sancoes = pl.DataFrame(
+        {
+            "cnpj_basico": pl.Series([], dtype=pl.Utf8),
+            "tipo_sancao": pl.Series([], dtype=pl.Utf8),
+        }
+    )
 
     result = enriquecer_socios(socios, sancoes, empresas)
 

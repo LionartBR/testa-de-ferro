@@ -41,16 +41,11 @@ def validate_doacoes(df: pl.DataFrame) -> pl.DataFrame:
     """
     # Step 1: require positive valor.
     if "valor" in df.columns:
-        df = df.filter(
-            pl.col("valor").is_not_null() & (pl.col("valor") > 0)
-        )
+        df = df.filter(pl.col("valor").is_not_null() & (pl.col("valor") > 0))
 
     # Step 2: require doc_doador.
     if "doc_doador" in df.columns:
-        df = df.filter(
-            pl.col("doc_doador").is_not_null()
-            & (pl.col("doc_doador").str.strip_chars() != "")
-        )
+        df = df.filter(pl.col("doc_doador").is_not_null() & (pl.col("doc_doador").str.strip_chars() != ""))
 
     # Step 3: require ano_eleicao.
     if "ano_eleicao" in df.columns:
@@ -63,8 +58,6 @@ def validate_doacoes(df: pl.DataFrame) -> pl.DataFrame:
 
     # Step 5: re-key pk_doacao.
     n = len(df)
-    df = df.with_columns(
-        pl.Series("pk_doacao", list(range(1, n + 1)))
-    )
+    df = df.with_columns(pl.Series("pk_doacao", list(range(1, n + 1))))
 
     return df

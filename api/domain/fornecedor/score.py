@@ -24,6 +24,7 @@ PESOS: dict[TipoIndicador, int] = {
 @dataclass(frozen=True)
 class IndicadorCumulativo:
     """Um indicador individual ativo. Peso vem da tabela PESOS."""
+
     tipo: TipoIndicador
     peso: int
     descricao: str
@@ -33,6 +34,7 @@ class IndicadorCumulativo:
 @dataclass(frozen=True)
 class ScoreDeRisco:
     """Score cumulativo calculado. Imutavel, derivado de indicadores."""
+
     indicadores: tuple[IndicadorCumulativo, ...]
     calculado_em: datetime
 

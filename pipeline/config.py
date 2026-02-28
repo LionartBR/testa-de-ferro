@@ -36,30 +36,18 @@ class SourceUrls:
     for mirror use or testing.
     """
 
-    cnpj_empresas: str = (
-        "https://arquivos.receitafederal.gov.br/public.php/webdav/2026-02/Empresas0.zip"
-    )
-    cnpj_qsa: str = (
-        "https://arquivos.receitafederal.gov.br/public.php/webdav/2026-02/Socios0.zip"
-    )
+    cnpj_empresas: str = "https://arquivos.receitafederal.gov.br/public.php/webdav/2026-02/Empresas0.zip"
+    cnpj_qsa: str = "https://arquivos.receitafederal.gov.br/public.php/webdav/2026-02/Socios0.zip"
     pncp_contratos: str = "https://pncp.gov.br/api/consulta/v1/contratos"
     comprasnet_base: str = "https://dadosabertos.compras.gov.br/modulo-download"
     tse_doacoes: str = (
         "https://cdn.tse.jus.br/estatistica/sead/odsele/prestacao_contas"
         "/prestacao_de_contas_eleitorais_candidatos_2022.zip"
     )
-    ceis: str = (
-        "https://portaldatransparencia.gov.br/download-de-dados/ceis"
-    )
-    cnep: str = (
-        "https://portaldatransparencia.gov.br/download-de-dados/cnep"
-    )
-    cepim: str = (
-        "https://portaldatransparencia.gov.br/download-de-dados/cepim"
-    )
-    servidores: str = (
-        "https://portaldatransparencia.gov.br/download-de-dados/servidores"
-    )
+    ceis: str = "https://portaldatransparencia.gov.br/download-de-dados/ceis"
+    cnep: str = "https://portaldatransparencia.gov.br/download-de-dados/cnep"
+    cepim: str = "https://portaldatransparencia.gov.br/download-de-dados/cepim"
+    servidores: str = "https://portaldatransparencia.gov.br/download-de-dados/servidores"
 
 
 @dataclass(frozen=True)
@@ -110,9 +98,7 @@ def load_config() -> PipelineConfig:
             "See .env.example for instructions."
         )
 
-    data_dir = Path(
-        os.environ.get("PIPELINE_DATA_DIR", str(_PIPELINE_DIR / "data"))
-    )
+    data_dir = Path(os.environ.get("PIPELINE_DATA_DIR", str(_PIPELINE_DIR / "data")))
     duckdb_output_path = Path(
         os.environ.get(
             "DUCKDB_OUTPUT_PATH",

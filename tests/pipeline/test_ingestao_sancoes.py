@@ -59,17 +59,19 @@ def test_parse_sancao_datas_como_date() -> None:
 
 def test_validate_remove_duplicatas() -> None:
     """Dedup by (cnpj, tipo_sancao, data_inicio) keeps first occurrence."""
-    df = pl.DataFrame({
-        "pk_sancao": [1, 2],
-        "cnpj": ["11.222.333/0001-81", "11.222.333/0001-81"],
-        "razao_social": ["EMPRESA A", "EMPRESA A"],
-        "tipo_sancao": ["CEIS", "CEIS"],
-        "orgao_sancionador": ["CGU", "CGU"],
-        "motivo": ["Fraude", "Fraude"],
-        "data_inicio": pl.Series([datetime.date(2023, 1, 1), datetime.date(2023, 1, 1)], dtype=pl.Date),
-        "data_fim": pl.Series([None, None], dtype=pl.Date),
-        "fk_fornecedor": pl.Series([None, None], dtype=pl.Int64),
-    })
+    df = pl.DataFrame(
+        {
+            "pk_sancao": [1, 2],
+            "cnpj": ["11.222.333/0001-81", "11.222.333/0001-81"],
+            "razao_social": ["EMPRESA A", "EMPRESA A"],
+            "tipo_sancao": ["CEIS", "CEIS"],
+            "orgao_sancionador": ["CGU", "CGU"],
+            "motivo": ["Fraude", "Fraude"],
+            "data_inicio": pl.Series([datetime.date(2023, 1, 1), datetime.date(2023, 1, 1)], dtype=pl.Date),
+            "data_fim": pl.Series([None, None], dtype=pl.Date),
+            "fk_fornecedor": pl.Series([None, None], dtype=pl.Int64),
+        }
+    )
     result = validate_sancoes(df)
 
     assert len(result) == 1
@@ -77,17 +79,19 @@ def test_validate_remove_duplicatas() -> None:
 
 def test_validate_rejeita_sem_cnpj() -> None:
     """Rows without CNPJ are dropped."""
-    df = pl.DataFrame({
-        "pk_sancao": [1, 2],
-        "cnpj": [None, "11.222.333/0001-81"],
-        "razao_social": ["EMPRESA X", "EMPRESA Y"],
-        "tipo_sancao": ["CEIS", "CEIS"],
-        "orgao_sancionador": ["CGU", "CGU"],
-        "motivo": [None, None],
-        "data_inicio": pl.Series([datetime.date(2023, 1, 1), datetime.date(2023, 2, 1)], dtype=pl.Date),
-        "data_fim": pl.Series([None, None], dtype=pl.Date),
-        "fk_fornecedor": pl.Series([None, None], dtype=pl.Int64),
-    })
+    df = pl.DataFrame(
+        {
+            "pk_sancao": [1, 2],
+            "cnpj": [None, "11.222.333/0001-81"],
+            "razao_social": ["EMPRESA X", "EMPRESA Y"],
+            "tipo_sancao": ["CEIS", "CEIS"],
+            "orgao_sancionador": ["CGU", "CGU"],
+            "motivo": [None, None],
+            "data_inicio": pl.Series([datetime.date(2023, 1, 1), datetime.date(2023, 2, 1)], dtype=pl.Date),
+            "data_fim": pl.Series([None, None], dtype=pl.Date),
+            "fk_fornecedor": pl.Series([None, None], dtype=pl.Int64),
+        }
+    )
     result = validate_sancoes(df)
 
     assert len(result) == 1

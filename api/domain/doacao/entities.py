@@ -12,6 +12,7 @@ from .value_objects import ValorDoacao
 @dataclass(frozen=True)
 class DoacaoEleitoral:
     """Doacao eleitoral vinculada a fornecedor (via CNPJ) ou socio (via cpf_hmac)."""
+
     fornecedor_cnpj: CNPJ | None
     socio_cpf_hmac: str | None
     candidato_nome: str

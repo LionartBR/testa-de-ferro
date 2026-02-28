@@ -16,7 +16,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._requests: dict[str, list[float]] = defaultdict(list)
 
     async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint,
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
     ) -> Response:
         settings = get_settings()
 
@@ -34,9 +36,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         window = 60.0
 
         # Limpar requests antigos
-        self._requests[client_ip] = [
-            t for t in self._requests[client_ip] if now - t < window
-        ]
+        self._requests[client_ip] = [t for t in self._requests[client_ip] if now - t < window]
 
         if len(self._requests[client_ip]) >= settings.rate_limit_per_minute:
             return Response(
