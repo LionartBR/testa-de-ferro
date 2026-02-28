@@ -29,31 +29,7 @@
 #   - Returned DataFrames carry a superset of the input columns.
 from __future__ import annotations
 
-import re
-
 import polars as pl
-
-# Regex to extract the street number from a logradouro string.
-# Accepts "Rua das Flores, 123" or "AV BRASIL 456" — captures the first
-# continuous digit sequence that appears in or after the street name.
-_NUMERO_PATTERN = re.compile(r",?\s*(\d+)")
-
-
-def _extrair_numero(logradouro: str | None) -> str | None:
-    """Extract the street number from a logradouro string.
-
-    Args:
-        logradouro: Full address string, possibly including the number.
-
-    Returns:
-        First digit sequence found in the string, or None if absent.
-    """
-    if not logradouro:
-        return None
-    match = _NUMERO_PATTERN.search(logradouro)
-    if match:
-        return match.group(1)
-    return None
 
 
 def enriquecer_socios(
@@ -95,16 +71,12 @@ def enriquecer_socios(
             pl.col("cnpj").str.replace_all(r"[.\-/]", "").str.slice(0, 8).alias("_cnpj_basico_sancionado")
         ).unique()
 
-    cnpjs_sancionados: set[str] = set(sancionados_basico["_cnpj_basico_sancionado"].drop_nulls().to_list())
-
-    is_sancionado_series = (
-        socios_df["cnpj_basico"]
-        .map_elements(
-            lambda v: v in cnpjs_sancionados if v is not None else False,
-            return_dtype=pl.Boolean,
-        )
-        .alias("is_sancionado")
-    )
+    # is_in on a Polars Series is fully vectorized — no Python-level row
+    # iteration unlike map_elements with a set lookup lambda.
+    # Pass a plain Python list to avoid the deprecation warning that Polars
+    # raises when is_in receives a Series of the same dtype (requires .implode()).
+    sancionados_list = sancionados_basico["_cnpj_basico_sancionado"].drop_nulls().to_list()
+    is_sancionado_series = socios_df["cnpj_basico"].is_in(sancionados_list).alias("is_sancionado")
 
     # ------------------------------------------------------------------
     # qtd_empresas_governo: count of distinct CNPJs per sócio by name
@@ -114,10 +86,10 @@ def enriquecer_socios(
     else:
         empresas_cnpj_basico = []
 
-    empresas_set: set[str] = set(empresas_cnpj_basico)
-
     # Filter socios to those that belong to known government-supplier companies.
-    socios_in_gov = socios_df.filter(socios_df["cnpj_basico"].is_in(list(empresas_set)))
+    # empresas_cnpj_basico is already a plain Python list from to_list() — is_in
+    # accepts it directly; no intermediate set conversion is needed.
+    socios_in_gov = socios_df.filter(socios_df["cnpj_basico"].is_in(empresas_cnpj_basico))
 
     # Count how many distinct cnpj_basico each nome_socio appears in.
     nome_count = socios_in_gov.group_by("nome_socio").agg(
@@ -163,20 +135,26 @@ def detectar_mesmo_endereco(
     if missing:
         raise ValueError(f"empresas_df is missing columns: {missing}")
 
+    # Build the normalised address key using vectorized Polars string ops.
+    # Equivalent to the old _normalise_address_key Python function but without
+    # row-level Python iteration.
+    #
+    # Strategy mirrors the scalar function:
+    #   1. Upper-case and strip the logradouro.
+    #   2. Extract the street number (first digit sequence, optionally preceded
+    #      by a comma and optional spaces).
+    #   3. Extract the street name: everything before that digit sequence,
+    #      then strip trailing commas and whitespace.
+    #   4. Concatenate as "STREET|NUMBER"; rows where either part is null
+    #      (no number found, or no text before it) are filtered out.
+    log_upper = pl.col("logradouro").str.strip_chars().str.to_uppercase()
+    numero = log_upper.str.extract(r",?\s*(\d+)", 1)
+    rua = log_upper.str.extract(r"^(.*?),?\s*\d+", 1).str.strip_chars().str.strip_chars_end(",").str.strip_chars()
+
     with_key = (
-        empresas_df.select(
-            [
-                pl.col("cnpj"),
-                pl.col("logradouro"),
-            ]
-        )
+        empresas_df.select([pl.col("cnpj"), pl.col("logradouro")])
         .with_columns(
-            pl.col("logradouro")
-            .map_elements(
-                _normalise_address_key,
-                return_dtype=pl.Utf8,
-            )
-            .alias("_address_key"),
+            pl.concat_str([rua, pl.lit("|"), numero]).alias("_address_key"),
         )
         .filter(pl.col("_address_key").is_not_null())
     )
@@ -198,34 +176,3 @@ def detectar_mesmo_endereco(
             pl.col("_address_key").alias("endereco_compartilhado"),
         ]
     )
-
-
-def _normalise_address_key(logradouro: str | None) -> str | None:
-    """Build a normalised address key from a logradouro string.
-
-    Extracts (street_name_normalised|street_number).  Returns None when the
-    logradouro is blank or has no recognisable number.
-
-    Args:
-        logradouro: Full address line, possibly including building number.
-
-    Returns:
-        Normalised key string, e.g. 'RUA DAS FLORES|123', or None.
-    """
-    if not logradouro:
-        return None
-
-    upper = logradouro.strip().upper()
-
-    # Extract the number first (first digit sequence in the string).
-    num_match = _NUMERO_PATTERN.search(upper)
-    if not num_match:
-        return None
-    numero = num_match.group(1)
-
-    # Street name: everything before the number match, stripped.
-    street_part = upper[: num_match.start()].strip().rstrip(",").strip()
-    if not street_part:
-        return None
-
-    return f"{street_part}|{numero}"

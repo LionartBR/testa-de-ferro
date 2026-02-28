@@ -25,6 +25,19 @@
 #   never cross-call each other — an alert does not contribute to the score
 #   and a score indicator does not generate an alert.
 #
+# ADR: Vectorized indicator functions (performance).
+#   All indicator functions previously used `iter_rows` + Python dict-append
+#   loops to build the output list. These have been replaced with Polars
+#   `select` + `concat_str` + `to_dicts()` to keep all transformation work
+#   inside the Polars engine (zero Python-level row iteration).
+#   The only exception is `_socio_em_multiplas_batch`, which retains
+#   `iter_rows` because its evidence field requires zipping two list-columns
+#   (nomes × qtd_empresas) whose contents can only be assembled at Python
+#   level after aggregation. The aggregated frame is already small (one row
+#   per fornecedor), so per-row Python work is negligible there.
+#   set→list→is_in anti-patterns have been replaced with semi-joins, which
+#   avoid materialising the full pk_fornecedor list in Python heap memory.
+#
 # Invariants:
 #   - calcular_scores_batch is a pure function over DataFrames. No IO.
 #   - Output columns match fato_score_detalhe schema exactly.
@@ -36,7 +49,7 @@ from decimal import Decimal
 
 import polars as pl
 
-from pipeline.transform.cnae_mapping import cnae_incompativel_com_objeto, get_cnae_category
+from pipeline.transform.cnae_mapping import CNAE_CATEGORIES, INCOMPATIBLE_COMBOS
 from pipeline.transform.cruzamentos import detectar_mesmo_endereco
 
 # ---------------------------------------------------------------------------
@@ -156,22 +169,32 @@ def _capital_social_baixo_batch(
         & (pl.col("valor_total") > contrato_threshold)
     )
 
-    rows: list[dict[str, object]] = []
-    for row in flagged.iter_rows(named=True):
-        rows.append(
-            {
-                "fk_fornecedor": row["pk_fornecedor"],
-                "indicador": "CAPITAL_SOCIAL_BAIXO",
-                "peso": _PESO_CAPITAL_SOCIAL_BAIXO,
-                "descricao": (
-                    f"Capital social R${row['capital_social']:,.2f} "
-                    f"desproporcional a contratos R${row['valor_total']:,.2f}"
-                ),
-                "evidencia": (f"capital={row['capital_social']}, valor_total_contratos={row['valor_total']}"),
-                "calculado_em": calculado_em,
-            }
-        )
-    return rows
+    if flagged.is_empty():
+        return []
+
+    result_df = flagged.select(
+        pl.col("pk_fornecedor").alias("fk_fornecedor"),
+        pl.lit("CAPITAL_SOCIAL_BAIXO").alias("indicador"),
+        pl.lit(_PESO_CAPITAL_SOCIAL_BAIXO).alias("peso"),
+        pl.concat_str(
+            [
+                pl.lit("Capital social R$"),
+                pl.col("capital_social").round(2).cast(pl.Utf8),
+                pl.lit(" desproporcional a contratos R$"),
+                pl.col("valor_total").round(2).cast(pl.Utf8),
+            ]
+        ).alias("descricao"),
+        pl.concat_str(
+            [
+                pl.lit("capital="),
+                pl.col("capital_social").cast(pl.Utf8),
+                pl.lit(", valor_total_contratos="),
+                pl.col("valor_total").cast(pl.Utf8),
+            ]
+        ).alias("evidencia"),
+        pl.lit(calculado_em).alias("calculado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _empresa_recente_batch(
@@ -215,27 +238,37 @@ def _empresa_recente_batch(
     threshold_days = _MESES_EMPRESA_RECENTE * 30.44
     flagged = joined.filter(pl.col("dias") < threshold_days)
 
-    rows: list[dict[str, object]] = []
-    for row in flagged.iter_rows(named=True):
-        rows.append(
-            {
-                "fk_fornecedor": row["pk_fornecedor"],
-                "indicador": "EMPRESA_RECENTE",
-                "peso": _PESO_EMPRESA_RECENTE,
-                "descricao": (
-                    f"Empresa aberta em {row['data_abertura']} obteve "
-                    f"primeiro contrato em {row['primeiro_contrato']} "
-                    f"({row['dias']} dias depois)"
-                ),
-                "evidencia": (
-                    f"data_abertura={row['data_abertura']}, "
-                    f"primeiro_contrato={row['primeiro_contrato']}, "
-                    f"dias={row['dias']}"
-                ),
-                "calculado_em": calculado_em,
-            }
-        )
-    return rows
+    if flagged.is_empty():
+        return []
+
+    result_df = flagged.select(
+        pl.col("pk_fornecedor").alias("fk_fornecedor"),
+        pl.lit("EMPRESA_RECENTE").alias("indicador"),
+        pl.lit(_PESO_EMPRESA_RECENTE).alias("peso"),
+        pl.concat_str(
+            [
+                pl.lit("Empresa aberta em "),
+                pl.col("data_abertura").cast(pl.Utf8),
+                pl.lit(" obteve primeiro contrato em "),
+                pl.col("primeiro_contrato").cast(pl.Utf8),
+                pl.lit(" ("),
+                pl.col("dias").cast(pl.Utf8),
+                pl.lit(" dias depois)"),
+            ]
+        ).alias("descricao"),
+        pl.concat_str(
+            [
+                pl.lit("data_abertura="),
+                pl.col("data_abertura").cast(pl.Utf8),
+                pl.lit(", primeiro_contrato="),
+                pl.col("primeiro_contrato").cast(pl.Utf8),
+                pl.lit(", dias="),
+                pl.col("dias").cast(pl.Utf8),
+            ]
+        ).alias("evidencia"),
+        pl.lit(calculado_em).alias("calculado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _sancao_historica_batch(
@@ -263,23 +296,35 @@ def _sancao_historica_batch(
     # Count expired sanctions per fornecedor.
     contagem = expiradas.group_by("fk_fornecedor").agg(pl.len().alias("qtd_expiradas"))
 
-    # Restrict to known fornecedores.
-    known_fornecedores = set(empresas_df["pk_fornecedor"].to_list())
-    contagem = contagem.filter(pl.col("fk_fornecedor").is_in(list(known_fornecedores)))
+    # Restrict to known fornecedores via semi-join (avoids materialising a Python set).
+    contagem = contagem.join(
+        empresas_df.select("pk_fornecedor").rename({"pk_fornecedor": "fk_fornecedor"}),
+        on="fk_fornecedor",
+        how="semi",
+    )
 
-    rows: list[dict[str, object]] = []
-    for row in contagem.iter_rows(named=True):
-        rows.append(
-            {
-                "fk_fornecedor": row["fk_fornecedor"],
-                "indicador": "SANCAO_HISTORICA",
-                "peso": _PESO_SANCAO_HISTORICA,
-                "descricao": f"{row['qtd_expiradas']} sancao(oes) historica(s) expirada(s)",
-                "evidencia": f"sancoes_expiradas={row['qtd_expiradas']}",
-                "calculado_em": calculado_em,
-            }
-        )
-    return rows
+    if contagem.is_empty():
+        return []
+
+    result_df = contagem.select(
+        pl.col("fk_fornecedor"),
+        pl.lit("SANCAO_HISTORICA").alias("indicador"),
+        pl.lit(_PESO_SANCAO_HISTORICA).alias("peso"),
+        pl.concat_str(
+            [
+                pl.col("qtd_expiradas").cast(pl.Utf8),
+                pl.lit(" sancao(oes) historica(s) expirada(s)"),
+            ]
+        ).alias("descricao"),
+        pl.concat_str(
+            [
+                pl.lit("sancoes_expiradas="),
+                pl.col("qtd_expiradas").cast(pl.Utf8),
+            ]
+        ).alias("evidencia"),
+        pl.lit(calculado_em).alias("calculado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _socio_em_multiplas_batch(
@@ -287,7 +332,15 @@ def _socio_em_multiplas_batch(
     socios_df: pl.DataFrame,
     calculado_em: datetime,
 ) -> list[dict[str, object]]:
-    """SOCIO_EM_MULTIPLAS_FORNECEDORAS: at least one sócio appears in 3+ companies."""
+    """SOCIO_EM_MULTIPLAS_FORNECEDORAS: at least one sócio appears in 3+ companies.
+
+    ADR: iter_rows retained for evidence field.
+      The aggregation yields list-columns (nomes, qtd_empresas) that must be
+      zipped together to build a human-readable evidence string. Polars cannot
+      express a cross-element zip of two list columns with concat_str. Since
+      the aggregated frame has at most one row per fornecedor (already small),
+      per-row Python iteration here is negligible.
+    """
     if socios_df.is_empty() or "qtd_empresas_governo" not in socios_df.columns:
         return []
 
@@ -369,22 +422,38 @@ def _fornecedor_exclusivo_batch(
     if orgao_counts.is_empty():
         return []
 
-    known_fornecedores = set(empresas_df["pk_fornecedor"].to_list())
-    orgao_counts = orgao_counts.filter(pl.col("fk_fornecedor").is_in(list(known_fornecedores)))
+    # Restrict to known fornecedores via semi-join (avoids materialising a Python set).
+    orgao_counts = orgao_counts.join(
+        empresas_df.select("pk_fornecedor").rename({"pk_fornecedor": "fk_fornecedor"}),
+        on="fk_fornecedor",
+        how="semi",
+    )
 
-    rows: list[dict[str, object]] = []
-    for row in orgao_counts.iter_rows(named=True):
-        rows.append(
-            {
-                "fk_fornecedor": row["fk_fornecedor"],
-                "indicador": "FORNECEDOR_EXCLUSIVO",
-                "peso": _PESO_FORNECEDOR_EXCLUSIVO,
-                "descricao": (f"Todos os {row['qtd_contratos']} contrato(s) sao com o mesmo orgao"),
-                "evidencia": (f"orgao_codigo={row['orgao_unico']}, qtd_contratos={row['qtd_contratos']}"),
-                "calculado_em": calculado_em,
-            }
-        )
-    return rows
+    if orgao_counts.is_empty():
+        return []
+
+    result_df = orgao_counts.select(
+        pl.col("fk_fornecedor"),
+        pl.lit("FORNECEDOR_EXCLUSIVO").alias("indicador"),
+        pl.lit(_PESO_FORNECEDOR_EXCLUSIVO).alias("peso"),
+        pl.concat_str(
+            [
+                pl.lit("Todos os "),
+                pl.col("qtd_contratos").cast(pl.Utf8),
+                pl.lit(" contrato(s) sao com o mesmo orgao"),
+            ]
+        ).alias("descricao"),
+        pl.concat_str(
+            [
+                pl.lit("orgao_codigo="),
+                pl.col("orgao_unico").cast(pl.Utf8),
+                pl.lit(", qtd_contratos="),
+                pl.col("qtd_contratos").cast(pl.Utf8),
+            ]
+        ).alias("evidencia"),
+        pl.lit(calculado_em).alias("calculado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _cnae_incompativel_batch(
@@ -392,7 +461,16 @@ def _cnae_incompativel_batch(
     contratos_df: pl.DataFrame,
     calculado_em: datetime,
 ) -> list[dict[str, object]]:
-    """CNAE_INCOMPATIVEL: company CNAE is incompatible with contract object category."""
+    """CNAE_INCOMPATIVEL: company CNAE is incompatible with contract object category.
+
+    ADR: Materialized incompatibility table replaces per-row Python calls.
+      The original implementation iterated each (fornecedor, cnae, objeto) row
+      and called cnae_incompativel_com_objeto() for each one — O(n) Python
+      function calls. We now expand CNAE_CATEGORIES × INCOMPATIBLE_COMBOS into
+      a flat DataFrame of (cnae_principal, incompat_objeto, cnae_category) pairs
+      and perform a single inner join. All incompatibility checks run inside
+      Polars, eliminating per-row Python overhead entirely.
+    """
     if contratos_df.is_empty() or "cnae_principal" not in empresas_df.columns:
         return []
     if "objeto_categoria" not in contratos_df.columns:
@@ -421,29 +499,63 @@ def _cnae_incompativel_batch(
     if joined.is_empty():
         return []
 
-    rows: list[dict[str, object]] = []
-    seen: set[int] = set()
-
-    for row in joined.iter_rows(named=True):
-        fk = row["fk_fornecedor"]
-        if fk in seen:
-            continue
-        cnae = row["cnae_principal"]
-        obj_cat = row["objeto_categoria"]
-        if cnae_incompativel_com_objeto(cnae, obj_cat):
-            seen.add(fk)
-            cat = get_cnae_category(cnae)
-            rows.append(
+    # Build the incompatibility lookup as a DataFrame so the check runs inside Polars.
+    incompat_rows: list[dict[str, str]] = []
+    for cnae, category in CNAE_CATEGORIES.items():
+        for incompat_category in INCOMPATIBLE_COMBOS.get(category, set()):
+            incompat_rows.append(
                 {
-                    "fk_fornecedor": fk,
-                    "indicador": "CNAE_INCOMPATIVEL",
-                    "peso": _PESO_CNAE_INCOMPATIVEL,
-                    "descricao": (f"CNAE {cnae} ({cat}) incompativel com objeto contratado ({obj_cat})"),
-                    "evidencia": f"cnae={cnae}, categoria_cnae={cat}, objeto_categoria={obj_cat}",
-                    "calculado_em": calculado_em,
+                    "cnae_principal": cnae,
+                    "incompat_objeto": incompat_category,
+                    "cnae_category": category,
                 }
             )
-    return rows
+
+    if not incompat_rows:
+        return []
+
+    incompat_df = pl.DataFrame(incompat_rows)
+
+    # Inner join: keep only rows where (cnae_principal, objeto_categoria) is incompatible.
+    # unique(subset=["fk_fornecedor"]) ensures at most one indicator row per fornecedor.
+    flagged = joined.join(
+        incompat_df,
+        left_on=["cnae_principal", "objeto_categoria"],
+        right_on=["cnae_principal", "incompat_objeto"],
+        how="inner",
+    ).unique(subset=["fk_fornecedor"], keep="first")
+
+    if flagged.is_empty():
+        return []
+
+    result_df = flagged.select(
+        pl.col("fk_fornecedor"),
+        pl.lit("CNAE_INCOMPATIVEL").alias("indicador"),
+        pl.lit(_PESO_CNAE_INCOMPATIVEL).alias("peso"),
+        pl.concat_str(
+            [
+                pl.lit("CNAE "),
+                pl.col("cnae_principal"),
+                pl.lit(" ("),
+                pl.col("cnae_category"),
+                pl.lit(") incompativel com objeto contratado ("),
+                pl.col("objeto_categoria"),
+                pl.lit(")"),
+            ]
+        ).alias("descricao"),
+        pl.concat_str(
+            [
+                pl.lit("cnae="),
+                pl.col("cnae_principal"),
+                pl.lit(", categoria_cnae="),
+                pl.col("cnae_category"),
+                pl.lit(", objeto_categoria="),
+                pl.col("objeto_categoria"),
+            ]
+        ).alias("evidencia"),
+        pl.lit(calculado_em).alias("calculado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _mesmo_endereco_batch(
@@ -461,41 +573,49 @@ def _mesmo_endereco_batch(
     if pairs.is_empty():
         return []
 
-    # Map CNPJs back to pk_fornecedor.
-    cnpj_to_pk = dict(
-        zip(
-            empresas_df["cnpj"].to_list(),
-            empresas_df["pk_fornecedor"].to_list(),
-            strict=False,
-        )
+    # Build pk mapping once and reuse for both sides of the pair.
+    pk_map = empresas_df.select(["cnpj", "pk_fornecedor"])
+
+    # Side A: cnpj_a is the flagged supplier, cnpj_b is the partner.
+    side_a = pairs.select(
+        pl.col("cnpj_a").alias("cnpj"),
+        pl.col("cnpj_b").alias("cnpj_parceiro"),
+        pl.col("endereco_compartilhado"),
+    ).join(pk_map, on="cnpj", how="inner").rename({"pk_fornecedor": "fk_fornecedor"})
+
+    # Side B: cnpj_b is the flagged supplier, cnpj_a is the partner.
+    side_b = pairs.select(
+        pl.col("cnpj_b").alias("cnpj"),
+        pl.col("cnpj_a").alias("cnpj_parceiro"),
+        pl.col("endereco_compartilhado"),
+    ).join(pk_map, on="cnpj", how="inner").rename({"pk_fornecedor": "fk_fornecedor"})
+
+    flagged = pl.concat([side_a, side_b]).unique(subset=["fk_fornecedor"], keep="first")
+
+    if flagged.is_empty():
+        return []
+
+    result_df = flagged.select(
+        pl.col("fk_fornecedor"),
+        pl.lit("MESMO_ENDERECO").alias("indicador"),
+        pl.lit(_PESO_MESMO_ENDERECO).alias("peso"),
+        pl.concat_str(
+            [
+                pl.lit("Compartilha endereco com "),
+                pl.col("cnpj_parceiro"),
+            ]
+        ).alias("descricao"),
+        pl.concat_str(
+            [
+                pl.lit("endereco="),
+                pl.col("endereco_compartilhado"),
+                pl.lit(", cnpj_parceiro="),
+                pl.col("cnpj_parceiro"),
+            ]
+        ).alias("evidencia"),
+        pl.lit(calculado_em).alias("calculado_em"),
     )
-
-    # Collect unique fornecedores that share an address with at least one other.
-    flagged: dict[int, tuple[str, str]] = {}
-    for row in pairs.iter_rows(named=True):
-        cnpj_a = row["cnpj_a"]
-        cnpj_b = row["cnpj_b"]
-        endereco = row["endereco_compartilhado"]
-        pk_a = cnpj_to_pk.get(cnpj_a)
-        pk_b = cnpj_to_pk.get(cnpj_b)
-        if pk_a is not None and pk_a not in flagged:
-            flagged[pk_a] = (cnpj_b, endereco)
-        if pk_b is not None and pk_b not in flagged:
-            flagged[pk_b] = (cnpj_a, endereco)
-
-    rows: list[dict[str, object]] = []
-    for fk, (cnpj_parceiro, endereco) in flagged.items():
-        rows.append(
-            {
-                "fk_fornecedor": fk,
-                "indicador": "MESMO_ENDERECO",
-                "peso": _PESO_MESMO_ENDERECO,
-                "descricao": f"Compartilha endereco com {cnpj_parceiro}",
-                "evidencia": f"endereco={endereco}, cnpj_parceiro={cnpj_parceiro}",
-                "calculado_em": calculado_em,
-            }
-        )
-    return rows
+    return result_df.to_dicts()
 
 
 def _crescimento_subito_batch(
@@ -538,29 +658,51 @@ def _crescimento_subito_batch(
     if flagged.is_empty():
         return []
 
-    known_fornecedores = set(empresas_df["pk_fornecedor"].to_list())
-
-    # Take the most recent jump per fornecedor.
+    # Take the most recent jump per fornecedor; restrict to known suppliers via semi-join.
     dedup = flagged.sort("ano", descending=True).unique(subset=["fk_fornecedor"], keep="first")
-    dedup = dedup.filter(pl.col("fk_fornecedor").is_in(list(known_fornecedores)))
+    dedup = dedup.join(
+        empresas_df.select("pk_fornecedor").rename({"pk_fornecedor": "fk_fornecedor"}),
+        on="fk_fornecedor",
+        how="semi",
+    )
 
-    rows: list[dict[str, object]] = []
-    for row in dedup.iter_rows(named=True):
-        razao = row["valor_anual"] / row["valor_prev"] if row["valor_prev"] > 0 else 0
-        rows.append(
-            {
-                "fk_fornecedor": row["fk_fornecedor"],
-                "indicador": "CRESCIMENTO_SUBITO",
-                "peso": _PESO_CRESCIMENTO_SUBITO,
-                "descricao": (f"Valor contratado saltou {razao:.1f}x entre {row['ano'] - 1} e {row['ano']}"),
-                "evidencia": (
-                    f"ano_anterior={row['ano'] - 1}, valor_anterior={row['valor_prev']:.2f}, "
-                    f"ano_atual={row['ano']}, valor_atual={row['valor_anual']:.2f}, razao={razao:.1f}x"
-                ),
-                "calculado_em": calculado_em,
-            }
-        )
-    return rows
+    if dedup.is_empty():
+        return []
+
+    result_df = dedup.with_columns(
+        (pl.col("valor_anual") / pl.col("valor_prev")).alias("razao")
+    ).select(
+        pl.col("fk_fornecedor"),
+        pl.lit("CRESCIMENTO_SUBITO").alias("indicador"),
+        pl.lit(_PESO_CRESCIMENTO_SUBITO).alias("peso"),
+        pl.concat_str(
+            [
+                pl.lit("Valor contratado saltou "),
+                pl.col("razao").round(1).cast(pl.Utf8),
+                pl.lit("x entre "),
+                (pl.col("ano") - 1).cast(pl.Utf8),
+                pl.lit(" e "),
+                pl.col("ano").cast(pl.Utf8),
+            ]
+        ).alias("descricao"),
+        pl.concat_str(
+            [
+                pl.lit("ano_anterior="),
+                (pl.col("ano") - 1).cast(pl.Utf8),
+                pl.lit(", valor_anterior="),
+                pl.col("valor_prev").round(2).cast(pl.Utf8),
+                pl.lit(", ano_atual="),
+                pl.col("ano").cast(pl.Utf8),
+                pl.lit(", valor_atual="),
+                pl.col("valor_anual").round(2).cast(pl.Utf8),
+                pl.lit(", razao="),
+                pl.col("razao").round(1).cast(pl.Utf8),
+                pl.lit("x"),
+            ]
+        ).alias("evidencia"),
+        pl.lit(calculado_em).alias("calculado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _sem_funcionarios_batch(
@@ -622,19 +764,15 @@ def _sem_funcionarios_batch(
     if flagged.is_empty():
         return []
 
-    rows: list[dict[str, object]] = []
-    for row in flagged.iter_rows(named=True):
-        rows.append(
-            {
-                "fk_fornecedor": row["pk_fornecedor"],
-                "indicador": "SEM_FUNCIONARIOS",
-                "peso": _PESO_SEM_FUNCIONARIOS,
-                "descricao": "Empresa declara zero funcionarios no RAIS mas possui contratos governamentais",
-                "evidencia": "qtd_funcionarios=0, contratos_governamentais=sim",
-                "calculado_em": calculado_em,
-            }
-        )
-    return rows
+    result_df = flagged.select(
+        pl.col("pk_fornecedor").alias("fk_fornecedor"),
+        pl.lit("SEM_FUNCIONARIOS").alias("indicador"),
+        pl.lit(_PESO_SEM_FUNCIONARIOS).alias("peso"),
+        pl.lit("Empresa declara zero funcionarios no RAIS mas possui contratos governamentais").alias("descricao"),
+        pl.lit("qtd_funcionarios=0, contratos_governamentais=sim").alias("evidencia"),
+        pl.lit(calculado_em).alias("calculado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _empty_score_df() -> pl.DataFrame:

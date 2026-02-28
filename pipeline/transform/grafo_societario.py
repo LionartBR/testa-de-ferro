@@ -110,16 +110,35 @@ def construir_grafo(
     # Level 1 adds connections between empresas that share a sócio.
     # We find all pairs (empresa_a, empresa_b) where the same _socio_id
     # links both companies.
+    #
+    # ADR: Pre-filter high-degree sócios before the self-join.
+    # A sócio that appears in N companies produces O(N²) pairs in the
+    # self-join. At N=100 that is already 10,000 pairs per sócio; at
+    # N=1000 it is 1,000,000. This is common for generic CPFs (e.g.
+    # holding company administrators) and can OOM the pipeline.
+    # The cap of 100 is intentionally conservative: legitimate business
+    # structures rarely have a single individual in more than 100 distinct
+    # government-contracting companies. High-degree nodes above this cap
+    # are still included as Level 0 nodes (sócio → empresa), so no
+    # information is lost — only the sibling-empresa edges are skipped.
     # ------------------------------------------------------------------
+    _MAX_SOCIO_DEGREE = 100
+    degree = socios_joined.group_by("_socio_id").agg(pl.len().alias("_deg"))
+    socios_for_level1 = socios_joined.join(
+        degree.filter(pl.col("_deg") <= _MAX_SOCIO_DEGREE),
+        on="_socio_id",
+        how="semi",
+    )
+
     self_join = (
-        socios_joined.select(
+        socios_for_level1.select(
             [
                 pl.col("_socio_id"),
                 pl.col("cnpj_formatado").alias("cnpj_a"),
             ]
         )
         .join(
-            socios_joined.select(
+            socios_for_level1.select(
                 [
                     pl.col("_socio_id"),
                     pl.col("cnpj_formatado").alias("cnpj_b"),

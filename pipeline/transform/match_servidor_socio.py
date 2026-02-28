@@ -25,47 +25,7 @@
 #     and orgao_lotacao (str|null).
 from __future__ import annotations
 
-import re
-
 import polars as pl
-
-# Pattern for QSA masked CPF format from Receita: '***222333**'
-# Captures the 6 visible middle digits (no separators in the QSA format).
-_QSA_CPF_MASK_PATTERN = re.compile(r"\*{3}(\d{3})(\d{3})\*{2}")
-
-# Pattern for Portal da Transparência format: '***.222.333-**'
-# Captures the 6 visible middle digits (with dots/dashes as separators).
-_PORTAL_CPF_MASK_PATTERN = re.compile(r"\*{3}\.(\d{3})\.(\d{3})-\*{2}")
-
-
-def _extrair_digitos_qsa(cpf_parcial: str | None) -> str | None:
-    """Extract 6 visible digits from a QSA-format masked CPF.
-
-    Handles two possible formats from the Receita:
-      - '***222333**'  (no separators)
-      - '***.222.333-**' (with separators, same as Portal da Transparência)
-
-    Args:
-        cpf_parcial: Raw masked CPF string from QSA parse.
-
-    Returns:
-        6-character digit string, or None if format is unrecognised.
-    """
-    if not cpf_parcial:
-        return None
-    stripped = cpf_parcial.strip()
-
-    # Try format without separators first (most common in Receita exports).
-    match = _QSA_CPF_MASK_PATTERN.match(stripped)
-    if match:
-        return match.group(1) + match.group(2)
-
-    # Fall back to format with separators.
-    match = _PORTAL_CPF_MASK_PATTERN.match(stripped)
-    if match:
-        return match.group(1) + match.group(2)
-
-    return None
 
 
 def match_servidor_socio(
@@ -94,14 +54,19 @@ def match_servidor_socio(
           - orgao_lotacao (str|null)     — filled from servidores for matches.
     """
     # Extract 6 visible digits from the QSA masked CPF column.
-    digitos_socio = (
-        socios_df["cpf_parcial"]
-        .map_elements(
-            _extrair_digitos_qsa,
-            return_dtype=pl.Utf8,
-        )
-        .alias("_digitos_socio")
-    )
+    # Vectorized via str.extract (runs in Rust) — replaces the former
+    # map_elements(_extrair_digitos_qsa) Python loop.
+    cpf_col = socios_df["cpf_parcial"].str.strip_chars()
+    # Format 1: ***222333** (no separators)
+    g1_nosep = cpf_col.str.extract(r"\*{3}(\d{3})\d{3}\*{2}", 1)
+    g2_nosep = cpf_col.str.extract(r"\*{3}\d{3}(\d{3})\*{2}", 1)
+    # Format 2: ***.222.333-** (with separators)
+    g1_sep = cpf_col.str.extract(r"\*{3}\.(\d{3})\.\d{3}-\*{2}", 1)
+    g2_sep = cpf_col.str.extract(r"\*{3}\.\d{3}\.(\d{3})-\*{2}", 1)
+    # Coalesce: prefer nosep format (most common), fall back to sep
+    d1 = g1_nosep.fill_null(g1_sep)
+    d2 = g2_nosep.fill_null(g2_sep)
+    digitos_socio = pl.concat_str([d1, d2]).alias("_digitos_socio")
 
     socios_with_digits = socios_df.with_columns(digitos_socio)
 

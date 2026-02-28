@@ -104,30 +104,48 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
     socios_enriched = enriquecer_socios(socios_enriched, sancoes_df, empresas_df)
     log(f"  Enriched socios: {len(socios_enriched):,} rows")
 
-    # 4. Pre-compute scores
-    log("Computing scores...")
-    scores_df = calcular_scores_batch(empresas_df, socios_enriched, contratos_df, sancoes_df)
-    write_parquet(scores_df, staging_dir / "score_detalhe.parquet")
+    # 4–6. Pre-compute scores, alerts, and graph in parallel.
+    # ADR: The three computations are fully independent — none reads the output of
+    # another, and all three take only the already-materialised DataFrames as input.
+    # ThreadPoolExecutor is sufficient (vs ProcessPoolExecutor) because Polars
+    # group_by/join operations release the GIL internally.
+    from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
+
+    log("Computing scores, alerts, and graph in parallel...")
+
+    def _compute_scores() -> pl.DataFrame:
+        df = calcular_scores_batch(empresas_df, socios_enriched, contratos_df, sancoes_df)
+        write_parquet(df, staging_dir / "score_detalhe.parquet")
+        return df
+
+    def _compute_alertas() -> pl.DataFrame:
+        df = detectar_alertas_batch(empresas_df, socios_enriched, contratos_df, sancoes_df, doacoes_df)
+        write_parquet(df, staging_dir / "alertas.parquet")
+        return df
+
+    def _compute_grafo() -> tuple[pl.DataFrame, pl.DataFrame]:
+        nos, arestas = construir_grafo(socios_enriched, empresas_df)
+        write_parquet(nos, staging_dir / "grafo_nos.parquet")
+        write_parquet(arestas, staging_dir / "grafo_arestas.parquet")
+        return nos, arestas
+
+    with _ThreadPoolExecutor(max_workers=3) as pool:
+        score_future = pool.submit(_compute_scores)
+        alerta_future = pool.submit(_compute_alertas)
+        grafo_future = pool.submit(_compute_grafo)
+
+    scores_df = score_future.result()
     log(f"  Scores: {len(scores_df):,} rows")
-
-    # 5. Pre-compute alerts
-    log("Computing alerts...")
-    alertas_df = detectar_alertas_batch(empresas_df, socios_enriched, contratos_df, sancoes_df, doacoes_df)
-    write_parquet(alertas_df, staging_dir / "alertas.parquet")
+    alertas_df = alerta_future.result()
     log(f"  Alertas: {len(alertas_df):,} rows")
+    nos_df, arestas_df = grafo_future.result()
+    log(f"  Grafo: {len(nos_df):,} nodes, {len(arestas_df):,} edges")
 
-    # 6. Denormalize aggregate columns into empresas (dim_fornecedor)
+    # 7. Denormalize aggregate columns into empresas (dim_fornecedor)
     log("Denormalizing dim_fornecedor aggregates...")
     empresas_df = _denormalize_fornecedor(empresas_df, scores_df, alertas_df, contratos_df)
     write_parquet(empresas_df, staging_dir / "empresas.parquet")
     log(f"  Denormalized {len(empresas_df):,} fornecedores")
-
-    # 7. Build corporate graph
-    log("Building corporate graph...")
-    nos_df, arestas_df = construir_grafo(socios_enriched, empresas_df)
-    write_parquet(nos_df, staging_dir / "grafo_nos.parquet")
-    write_parquet(arestas_df, staging_dir / "grafo_arestas.parquet")
-    log(f"  Grafo: {len(nos_df):,} nodes, {len(arestas_df):,} edges")
 
     # 8. Write enriched socios to staging — rename to match dim_socio schema
     socios_for_staging = _prepare_socios_staging(socios_enriched)
@@ -204,7 +222,7 @@ def _merge_contratos(contratos_df: pl.DataFrame, comprasnet_df: pl.DataFrame) ->
 
     if "pk_contrato" in merged.columns:
         n = len(merged)
-        merged = merged.with_columns(pl.Series("pk_contrato", list(range(1, n + 1))))
+        merged = merged.with_columns(pl.int_range(1, n + 1, eager=True).alias("pk_contrato"))
 
     return merged
 
@@ -232,7 +250,7 @@ def _prepare_socios_staging(socios_df: pl.DataFrame) -> pl.DataFrame:
 
     return pl.DataFrame(
         {
-            "pk_socio": list(range(1, n + 1)),
+            "pk_socio": pl.int_range(1, n + 1, eager=True),
             "cpf_hmac": cpf_hmac,
             "nome": nome,
             "qualificacao": qualificacao,
@@ -420,51 +438,72 @@ def _run_sources(config: PipelineConfig) -> None:
             raw_paths[name] = future.result()  # raises on error
             log(f"  Downloaded: {name}")
 
-    # ---- Phase 2: Parse + validate (sequential, CPU-bound) ----
-    log("Parsing and validating...")
+    # ---- Phase 2: Parse + validate (parallel — Polars releases the GIL internally) ----
+    # ADR: ThreadPoolExecutor gives near-linear speedup here because Polars CSV/JSON
+    # parsing releases the GIL, allowing true parallel CPU utilisation across threads.
+    # Sancoes is handled as a single task that concats CEIS+CNEP+CEPIM before validate
+    # to preserve the validate_sancoes invariant that all three lists are merged first.
+    log("Parsing and validating in parallel...")
 
-    empresas_df = validate_empresas(parse_empresas(raw_paths["cnpj_empresas"]))
-    write_parquet(empresas_df, staging_dir / "empresas.parquet")
-    log(f"  Parsed empresas: {len(empresas_df):,} rows")
+    def _parse_and_write(parse_fn: Callable[[], pl.DataFrame], output_path: Path) -> int:
+        df = parse_fn()
+        write_parquet(df, output_path)
+        return len(df)
 
-    qsa_df = validate_qsa(parse_qsa(raw_paths["cnpj_qsa"]))
-    write_parquet(qsa_df, staging_dir / "qsa.parquet")
-    log(f"  Parsed qsa: {len(qsa_df):,} rows")
+    parse_tasks: dict[str, tuple[Callable[[], pl.DataFrame], Path]] = {
+        "empresas": (
+            lambda: validate_empresas(parse_empresas(raw_paths["cnpj_empresas"])),
+            staging_dir / "empresas.parquet",
+        ),
+        "qsa": (
+            lambda: validate_qsa(parse_qsa(raw_paths["cnpj_qsa"])),
+            staging_dir / "qsa.parquet",
+        ),
+        "contratos": (
+            lambda: validate_contratos(parse_contratos(raw_paths["pncp"])),
+            staging_dir / "contratos.parquet",
+        ),
+        "sancoes": (
+            lambda: validate_sancoes(
+                pl.concat([
+                    parse_ceis(raw_paths["ceis"]),
+                    parse_cnep(raw_paths["cnep"]),
+                    parse_cepim(raw_paths["cepim"]),
+                ])
+            ),
+            staging_dir / "sancoes.parquet",
+        ),
+        "servidores": (
+            lambda: validate_servidores(parse_servidores(raw_paths["servidores"])),
+            staging_dir / "servidores.parquet",
+        ),
+        "doacoes": (
+            lambda: validate_doacoes(parse_doacoes(raw_paths["tse"])),
+            staging_dir / "doacoes.parquet",
+        ),
+        "rais": (
+            lambda: validate_rais(parse_rais(raw_paths["rais"])),
+            staging_dir / "rais.parquet",
+        ),
+        "juntas_comerciais": (
+            lambda: validate_qsa_diffs(parse_qsa_diffs(raw_paths["juntas_comerciais"])),
+            staging_dir / "juntas_comerciais.parquet",
+        ),
+        "comprasnet": (
+            lambda: validate_comprasnet(parse_comprasnet(raw_paths["comprasnet"])),
+            staging_dir / "comprasnet.parquet",
+        ),
+    }
 
-    contratos_df = validate_contratos(parse_contratos(raw_paths["pncp"]))
-    write_parquet(contratos_df, staging_dir / "contratos.parquet")
-    log(f"  Parsed contratos: {len(contratos_df):,} rows")
-
-    sancoes_all = pl.concat(
-        [
-            parse_ceis(raw_paths["ceis"]),
-            parse_cnep(raw_paths["cnep"]),
-            parse_cepim(raw_paths["cepim"]),
-        ]
-    )
-    sancoes_df = validate_sancoes(sancoes_all)
-    write_parquet(sancoes_df, staging_dir / "sancoes.parquet")
-    log(f"  Parsed sancoes: {len(sancoes_df):,} rows")
-
-    servidores_df = validate_servidores(parse_servidores(raw_paths["servidores"]))
-    write_parquet(servidores_df, staging_dir / "servidores.parquet")
-    log(f"  Parsed servidores: {len(servidores_df):,} rows")
-
-    doacoes_df = validate_doacoes(parse_doacoes(raw_paths["tse"]))
-    write_parquet(doacoes_df, staging_dir / "doacoes.parquet")
-    log(f"  Parsed doacoes: {len(doacoes_df):,} rows")
-
-    rais_df = validate_rais(parse_rais(raw_paths["rais"]))
-    write_parquet(rais_df, staging_dir / "rais.parquet")
-    log(f"  Parsed rais: {len(rais_df):,} rows")
-
-    juntas_df = validate_qsa_diffs(parse_qsa_diffs(raw_paths["juntas_comerciais"]))
-    write_parquet(juntas_df, staging_dir / "juntas_comerciais.parquet")
-    log(f"  Parsed juntas_comerciais: {len(juntas_df):,} rows")
-
-    comprasnet_df = validate_comprasnet(parse_comprasnet(raw_paths["comprasnet"]))
-    write_parquet(comprasnet_df, staging_dir / "comprasnet.parquet")
-    log(f"  Parsed comprasnet: {len(comprasnet_df):,} rows")
+    with ThreadPoolExecutor(max_workers=len(parse_tasks)) as pool:
+        parse_futures: dict[Future[int], str] = {
+            pool.submit(_parse_and_write, fn, path): name
+            for name, (fn, path) in parse_tasks.items()
+        }
+        for future in as_completed(parse_futures):
+            name = parse_futures[future]
+            count = future.result()  # raises on error, aborting the pipeline
+            log(f"  Parsed {name}: {count:,} rows")
 
 
 if __name__ == "__main__":

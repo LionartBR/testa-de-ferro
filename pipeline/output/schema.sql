@@ -171,3 +171,9 @@ CREATE INDEX idx_alerta_fornecedor ON fato_alerta_critico(fk_fornecedor);
 CREATE INDEX idx_alerta_tipo ON fato_alerta_critico(tipo_alerta);
 CREATE INDEX idx_alerta_severidade ON fato_alerta_critico(severidade);
 CREATE INDEX idx_alerta_detectado ON fato_alerta_critico(detectado_em DESC);
+
+-- Composite indexes for common API query patterns
+CREATE INDEX idx_alerta_sev_tipo ON fato_alerta_critico(severidade, tipo_alerta);
+CREATE INDEX idx_fornecedor_ranking ON dim_fornecedor(faixa_risco, uf, score_risco DESC);
+CREATE INDEX idx_sancao_data_fim ON dim_sancao(data_fim);
+CREATE INDEX idx_contrato_fornecedor_data ON fato_contrato(fk_fornecedor, data_assinatura);

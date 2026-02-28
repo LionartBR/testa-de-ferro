@@ -6,9 +6,9 @@
 #   - Validation is deliberately aggressive: any row that cannot be trusted
 #     (missing CNPJ, duplicate, malformed) is dropped and counted in logging.
 #     It is safer to under-report than to propagate bad data downstream.
-#   - CNPJ format validation uses a lightweight regex check rather than the
-#     full modulo-11 verifier digit check. The full verifier is applied in the
-#     domain layer (CNPJ value object). The pipeline only ensures structural
+#   - CNPJ format validation uses a vectorized str.contains regex rather than
+#     the full modulo-11 verifier digit check. The full verifier is applied in
+#     the domain layer (CNPJ value object). The pipeline only ensures structural
 #     correctness (right number of digits and separators).
 #   - validate_qsa deduplicates on (cnpj_basico, cpf_parcial) because the QSA
 #     file can contain repeated entries when a person holds multiple roles in
@@ -22,18 +22,7 @@
 #   - validate_qsa output: nome_socio is non-null and non-empty.
 from __future__ import annotations
 
-import re
-
 import polars as pl
-
-_CNPJ_PATTERN = re.compile(r"^\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}$")
-
-
-def _is_valid_cnpj_format(cnpj: str | None) -> bool:
-    """Return True if the CNPJ string matches the canonical formatted pattern."""
-    if cnpj is None:
-        return False
-    return bool(_CNPJ_PATTERN.match(cnpj))
 
 
 def validate_empresas(df: pl.DataFrame) -> pl.DataFrame:
@@ -51,9 +40,9 @@ def validate_empresas(df: pl.DataFrame) -> pl.DataFrame:
     Returns:
         Cleaned DataFrame. Guaranteed: cnpj non-null, razao_social non-null.
     """
-    # Step 1: filter invalid CNPJ formats.
-    valid_cnpj_mask = df["cnpj"].map_elements(_is_valid_cnpj_format, return_dtype=pl.Boolean)
-    df = df.filter(valid_cnpj_mask)
+    # Step 1: filter invalid CNPJ formats using a vectorized regex — avoids
+    # Python-level row iteration that map_elements would impose on large CSVs.
+    df = df.filter(pl.col("cnpj").str.contains(r"^\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}$"))
 
     # Step 2: drop rows without razao_social.
     df = df.filter(pl.col("razao_social").is_not_null() & (pl.col("razao_social").str.strip_chars() != ""))
@@ -62,8 +51,9 @@ def validate_empresas(df: pl.DataFrame) -> pl.DataFrame:
     df = df.unique(subset=["cnpj"], keep="first", maintain_order=True)
 
     # Step 4: re-assign pk_fornecedor to ensure contiguous sequence.
+    # pl.int_range is fully vectorized — avoids constructing a Python list.
     n = len(df)
-    df = df.with_columns(pl.Series("pk_fornecedor", list(range(1, n + 1))))
+    df = df.with_columns(pl.int_range(1, n + 1, eager=True).alias("pk_fornecedor"))
 
     return df
 

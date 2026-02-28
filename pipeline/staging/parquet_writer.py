@@ -32,7 +32,7 @@ def write_parquet(df: pl.DataFrame, path: Path) -> Path:
         after resolution, returned for call-chain convenience).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    df.write_parquet(path)
+    df.write_parquet(path, compression="zstd", compression_level=3)
     return path
 
 

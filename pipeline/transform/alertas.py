@@ -170,33 +170,63 @@ def _socio_servidor_publico_batch(
     if joined.is_empty():
         return []
 
-    rows: list[dict[str, object]] = []
     pk_socio_col = "pk_socio" if "pk_socio" in joined.columns else None
+    has_orgao = "orgao_lotacao" in joined.columns
+    has_cpf_hmac = "cpf_hmac" in joined.columns
 
-    for row in joined.iter_rows(named=True):
-        orgao = row.get("orgao_lotacao")
-        descricao = f"Socio {row['nome_socio']} e servidor publico"
-        if orgao:
-            descricao += f" ({orgao})"
-
-        evidencia = f"nome={row['nome_socio']}"
-        if "cpf_hmac" in row and row["cpf_hmac"]:
-            evidencia = f"socio_cpf_hmac={row['cpf_hmac']}, " + evidencia
-        if orgao:
-            evidencia += f", orgao={orgao}"
-
-        rows.append(
-            {
-                "fk_fornecedor": row["pk_fornecedor"],
-                "fk_socio": row[pk_socio_col] if pk_socio_col else None,
-                "tipo_alerta": _SOCIO_SERVIDOR_PUBLICO,
-                "severidade": _GRAVISSIMO,
-                "descricao": descricao,
-                "evidencia": evidencia,
-                "detectado_em": detectado_em,
-            }
+    # Build descricao: "Socio {nome} e servidor publico" optionally appended
+    # with " ({orgao})" when orgao_lotacao is not null.
+    descricao_expr = pl.concat_str(
+        [pl.lit("Socio "), pl.col("nome_socio"), pl.lit(" e servidor publico")]
+    )
+    if has_orgao:
+        # ADR: when orgao_lotacao is present and non-null, append " ({orgao})".
+        # pl.when produces a branch that is null when the condition is false, so
+        # fill_null("") collapses the absent suffix cleanly.
+        suffix_expr = (
+            pl.when(pl.col("orgao_lotacao").is_not_null())
+            .then(pl.concat_str([pl.lit(" ("), pl.col("orgao_lotacao"), pl.lit(")")]))
+            .otherwise(pl.lit(""))
         )
-    return rows
+        descricao_expr = pl.concat_str([descricao_expr, suffix_expr])
+
+    # Build evidencia: optionally prefixed with "socio_cpf_hmac={hmac}, " when
+    # cpf_hmac is non-null, then "nome={nome}", optionally suffixed with
+    # ", orgao={orgao}" when orgao_lotacao is non-null.
+    base_evidencia_expr = pl.concat_str([pl.lit("nome="), pl.col("nome_socio")])
+
+    if has_cpf_hmac:
+        prefix_expr = (
+            pl.when(pl.col("cpf_hmac").is_not_null())
+            .then(pl.concat_str([pl.lit("socio_cpf_hmac="), pl.col("cpf_hmac"), pl.lit(", ")]))
+            .otherwise(pl.lit(""))
+        )
+        base_evidencia_expr = pl.concat_str([prefix_expr, base_evidencia_expr])
+
+    if has_orgao:
+        orgao_suffix_expr = (
+            pl.when(pl.col("orgao_lotacao").is_not_null())
+            .then(pl.concat_str([pl.lit(", orgao="), pl.col("orgao_lotacao")]))
+            .otherwise(pl.lit(""))
+        )
+        base_evidencia_expr = pl.concat_str([base_evidencia_expr, orgao_suffix_expr])
+
+    select_exprs: list[pl.Expr] = [
+        pl.col("pk_fornecedor").alias("fk_fornecedor"),
+        pl.lit(None).cast(pl.Int64).alias("fk_socio"),
+        pl.lit(_SOCIO_SERVIDOR_PUBLICO).alias("tipo_alerta"),
+        pl.lit(_GRAVISSIMO).alias("severidade"),
+        descricao_expr.alias("descricao"),
+        base_evidencia_expr.alias("evidencia"),
+        pl.lit(detectado_em).alias("detectado_em"),
+    ]
+
+    # When pk_socio is available, replace the null fk_socio placeholder.
+    if pk_socio_col is not None:
+        select_exprs[1] = pl.col(pk_socio_col).alias("fk_socio")
+
+    result_df = joined.select(select_exprs)
+    return result_df.to_dicts()
 
 
 def _empresa_sancionada_contratando_batch(
@@ -231,26 +261,43 @@ def _empresa_sancionada_contratando_batch(
     if both.is_empty():
         return []
 
-    known_fornecedores = set(empresas_df["pk_fornecedor"].to_list())
-    both = both.filter(pl.col("fk_fornecedor").is_in(list(known_fornecedores)))
+    # Semi-join against empresas_df to keep only known fornecedores.
+    # ADR: semi-join is O(n+m) via hash table; the old set→list→is_in pattern
+    # was functionally equivalent but materialised an intermediate Python set.
+    both = both.join(
+        empresas_df.select("pk_fornecedor").rename({"pk_fornecedor": "fk_fornecedor"}),
+        on="fk_fornecedor",
+        how="semi",
+    )
 
-    rows: list[dict[str, object]] = []
-    for row in both.iter_rows(named=True):
-        rows.append(
-            {
-                "fk_fornecedor": row["fk_fornecedor"],
-                "fk_socio": None,
-                "tipo_alerta": _EMPRESA_SANCIONADA_CONTRATANDO,
-                "severidade": _GRAVISSIMO,
-                "descricao": (
-                    f"Empresa com {row['qtd_vigentes']} sancao(oes) vigente(s) "
-                    f"e {row['qtd_contratos']} contrato(s) ativo(s)"
-                ),
-                "evidencia": (f"sancoes_vigentes={row['qtd_vigentes']}, qtd_contratos={row['qtd_contratos']}"),
-                "detectado_em": detectado_em,
-            }
-        )
-    return rows
+    if both.is_empty():
+        return []
+
+    result_df = both.select(
+        pl.col("fk_fornecedor"),
+        pl.lit(None).cast(pl.Int64).alias("fk_socio"),
+        pl.lit(_EMPRESA_SANCIONADA_CONTRATANDO).alias("tipo_alerta"),
+        pl.lit(_GRAVISSIMO).alias("severidade"),
+        pl.concat_str(
+            [
+                pl.lit("Empresa com "),
+                pl.col("qtd_vigentes").cast(pl.Utf8),
+                pl.lit(" sancao(oes) vigente(s) e "),
+                pl.col("qtd_contratos").cast(pl.Utf8),
+                pl.lit(" contrato(s) ativo(s)"),
+            ]
+        ).alias("descricao"),
+        pl.concat_str(
+            [
+                pl.lit("sancoes_vigentes="),
+                pl.col("qtd_vigentes").cast(pl.Utf8),
+                pl.lit(", qtd_contratos="),
+                pl.col("qtd_contratos").cast(pl.Utf8),
+            ]
+        ).alias("evidencia"),
+        pl.lit(detectado_em).alias("detectado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _doacao_para_contratante_batch(
@@ -289,29 +336,50 @@ def _doacao_para_contratante_batch(
     if both.is_empty():
         return []
 
-    known_fornecedores = set(empresas_df["pk_fornecedor"].to_list())
-    both = both.filter(pl.col("fk_fornecedor").is_in(list(known_fornecedores)))
+    # Semi-join against empresas_df to keep only known fornecedores.
+    # ADR: semi-join is O(n+m) via hash table; the old set→list→is_in pattern
+    # was functionally equivalent but materialised an intermediate Python set.
+    both = both.join(
+        empresas_df.select("pk_fornecedor").rename({"pk_fornecedor": "fk_fornecedor"}),
+        on="fk_fornecedor",
+        how="semi",
+    )
 
-    rows: list[dict[str, object]] = []
-    for row in both.iter_rows(named=True):
-        rows.append(
-            {
-                "fk_fornecedor": row["fk_fornecedor"],
-                "fk_socio": None,
-                "tipo_alerta": _DOACAO_PARA_CONTRATANTE,
-                "severidade": _GRAVE,
-                "descricao": (
-                    f"{row['qtd_doacoes_materiais']} doacao(oes) material(is) "
-                    f"com contratos totalizando R${row['valor_total_contratos']:,.2f}"
-                ),
-                "evidencia": (
-                    f"doacoes_materiais={row['qtd_doacoes_materiais']}, "
-                    f"valor_total_contratos={row['valor_total_contratos']}"
-                ),
-                "detectado_em": detectado_em,
-            }
-        )
-    return rows
+    if both.is_empty():
+        return []
+
+    # ADR: descricao uses Python's {:,.2f} formatting for valor_total_contratos
+    # (comma-separated thousands, 2 decimal places). Polars cast(Utf8) on Float64
+    # does not replicate this locale-independent formatting, so map_elements is
+    # used only for the descricao column to preserve the exact output value.
+    # All other columns are fully vectorised.
+    result_df = both.with_columns(
+        pl.col("valor_total_contratos")
+        .map_elements(lambda v: f"{v:,.2f}", return_dtype=pl.Utf8)
+        .alias("valor_fmt")
+    ).select(
+        pl.col("fk_fornecedor"),
+        pl.lit(None).cast(pl.Int64).alias("fk_socio"),
+        pl.lit(_DOACAO_PARA_CONTRATANTE).alias("tipo_alerta"),
+        pl.lit(_GRAVE).alias("severidade"),
+        pl.concat_str(
+            [
+                pl.col("qtd_doacoes_materiais").cast(pl.Utf8),
+                pl.lit(" doacao(oes) material(is) com contratos totalizando R$"),
+                pl.col("valor_fmt"),
+            ]
+        ).alias("descricao"),
+        pl.concat_str(
+            [
+                pl.lit("doacoes_materiais="),
+                pl.col("qtd_doacoes_materiais").cast(pl.Utf8),
+                pl.lit(", valor_total_contratos="),
+                pl.col("valor_total_contratos").cast(pl.Utf8),
+            ]
+        ).alias("evidencia"),
+        pl.lit(detectado_em).alias("detectado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _socio_sancionado_em_outra_batch(
@@ -342,26 +410,38 @@ def _socio_sancionado_em_outra_batch(
     if joined.is_empty():
         return []
 
-    rows: list[dict[str, object]] = []
     pk_socio_col = "pk_socio" if "pk_socio" in joined.columns else None
+    has_cpf_hmac = "cpf_hmac" in joined.columns
 
-    for row in joined.iter_rows(named=True):
-        evidencia = f"nome={row['nome_socio']}"
-        if "cpf_hmac" in row and row["cpf_hmac"]:
-            evidencia = f"socio_cpf_hmac={row['cpf_hmac']}, " + evidencia
+    # Build evidencia: optionally prefixed with "socio_cpf_hmac={hmac}, " when
+    # cpf_hmac is present and non-null, then "nome={nome}".
+    base_evidencia_expr = pl.concat_str([pl.lit("nome="), pl.col("nome_socio")])
 
-        rows.append(
-            {
-                "fk_fornecedor": row["pk_fornecedor"],
-                "fk_socio": row[pk_socio_col] if pk_socio_col else None,
-                "tipo_alerta": _SOCIO_SANCIONADO_EM_OUTRA,
-                "severidade": _GRAVE,
-                "descricao": f"Socio {row['nome_socio']} e socio de outra empresa sancionada",
-                "evidencia": evidencia,
-                "detectado_em": detectado_em,
-            }
+    if has_cpf_hmac:
+        prefix_expr = (
+            pl.when(pl.col("cpf_hmac").is_not_null())
+            .then(pl.concat_str([pl.lit("socio_cpf_hmac="), pl.col("cpf_hmac"), pl.lit(", ")]))
+            .otherwise(pl.lit(""))
         )
-    return rows
+        base_evidencia_expr = pl.concat_str([prefix_expr, base_evidencia_expr])
+
+    select_exprs: list[pl.Expr] = [
+        pl.col("pk_fornecedor").alias("fk_fornecedor"),
+        pl.lit(None).cast(pl.Int64).alias("fk_socio"),
+        pl.lit(_SOCIO_SANCIONADO_EM_OUTRA).alias("tipo_alerta"),
+        pl.lit(_GRAVE).alias("severidade"),
+        pl.concat_str(
+            [pl.lit("Socio "), pl.col("nome_socio"), pl.lit(" e socio de outra empresa sancionada")]
+        ).alias("descricao"),
+        base_evidencia_expr.alias("evidencia"),
+        pl.lit(detectado_em).alias("detectado_em"),
+    ]
+
+    if pk_socio_col is not None:
+        select_exprs[1] = pl.col(pk_socio_col).alias("fk_socio")
+
+    result_df = joined.select(select_exprs)
+    return result_df.to_dicts()
 
 
 def _rodizio_licitacao_batch(
@@ -481,36 +561,30 @@ def _rodizio_licitacao_batch(
     if shared_counts.is_empty():
         return []
 
-    # Collect unique fornecedor PKs that appear in any flagged pair.
-    flagged_fk_a = shared_counts.select(pl.col("fk_a").alias("fk_fornecedor"))
-    flagged_fk_b = shared_counts.select(pl.col("fk_b").alias("fk_fornecedor"))
-    flagged_all = (
-        pl.concat([flagged_fk_a, flagged_fk_b])
-        .unique()
-        .join(shared_counts, left_on="fk_fornecedor", right_on="fk_a", how="left")
-        .select("fk_fornecedor")
-        .unique()
+    # ADR: Pre-aggregate the maximum shared count per fornecedor before emitting
+    # alert rows. The old code did a per-row DataFrame filter inside a Python
+    # loop (O(n*m)); here we union both sides of the pair, group_by once, and
+    # join — fully vectorised.
+    max_a = shared_counts.select(pl.col("fk_a").alias("fk_fornecedor"), pl.col("qtd_licitacoes_comuns"))
+    max_b = shared_counts.select(pl.col("fk_b").alias("fk_fornecedor"), pl.col("qtd_licitacoes_comuns"))
+    max_per_fk = (
+        pl.concat([max_a, max_b])
+        .group_by("fk_fornecedor")
+        .agg(pl.col("qtd_licitacoes_comuns").max().alias("max_licitacoes_comuns"))
     )
 
-    rows: list[dict[str, object]] = []
-    for row in flagged_all.iter_rows(named=True):
-        # Find the maximum shared licitações count for this fornecedor to
-        # include in the evidence string.
-        max_shared = shared_counts.filter(
-            (pl.col("fk_a") == row["fk_fornecedor"]) | (pl.col("fk_b") == row["fk_fornecedor"])
-        )["qtd_licitacoes_comuns"].max()
-        rows.append(
-            {
-                "fk_fornecedor": row["fk_fornecedor"],
-                "fk_socio": None,
-                "tipo_alerta": _RODIZIO_LICITACAO,
-                "severidade": _GRAVISSIMO,
-                "descricao": ("Empresa participa de licitacoes com outra empresa que compartilha socios"),
-                "evidencia": f"max_licitacoes_comuns_com_par={max_shared}",
-                "detectado_em": detectado_em,
-            }
-        )
-    return rows
+    result_df = max_per_fk.select(
+        pl.col("fk_fornecedor"),
+        pl.lit(None).cast(pl.Int64).alias("fk_socio"),
+        pl.lit(_RODIZIO_LICITACAO).alias("tipo_alerta"),
+        pl.lit(_GRAVISSIMO).alias("severidade"),
+        pl.lit("Empresa participa de licitacoes com outra empresa que compartilha socios").alias("descricao"),
+        pl.concat_str(
+            [pl.lit("max_licitacoes_comuns_com_par="), pl.col("max_licitacoes_comuns").cast(pl.Utf8)]
+        ).alias("evidencia"),
+        pl.lit(detectado_em).alias("detectado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _testa_de_ferro_batch(
@@ -549,6 +623,11 @@ def _testa_de_ferro_batch(
     proxy for "first procurement contact". Using data_abertura as the anchor
     is conservative — a company may have existed before its first bid. The
     < 12 month window filters only the most suspicious cases.
+
+    ADR: The final join (flagged_pks × candidates) replaces the old per-row
+    filter loop (O(n*m)) with a vectorised inner join. The evidence fields
+    (capital_social, data_abertura, primeiro_contrato) come directly from the
+    joined columns, eliminating the intermediate Python indexing.
     """
     required_empresa_cols = {"pk_fornecedor", "cnpj_basico", "capital_social", "data_abertura"}
     required_socio_cols = {"cnpj_basico", "nome_socio"}
@@ -641,37 +720,42 @@ def _testa_de_ferro_batch(
     # One alert per unique pk_fornecedor (there may be multiple flagged sócios).
     flagged_pks = socios_with_pk.select("pk_fornecedor").unique()
 
-    rows: list[dict[str, object]] = []
-    for row in flagged_pks.iter_rows(named=True):
-        pk = row["pk_fornecedor"]
+    # ADR: join flagged_pks with candidates to retrieve evidence columns in a
+    # single vectorised pass. The old code filtered candidates per-row inside a
+    # Python loop (O(n*m)); the join is O(n+m) via hash table.
+    flagged_with_evidence = flagged_pks.join(candidates, on="pk_fornecedor", how="inner")
+    if flagged_with_evidence.is_empty():
+        return []
 
-        # Gather evidence from the candidate empresa row.
-        empresa_row = candidates.filter(pl.col("pk_fornecedor") == pk)
-        if empresa_row.is_empty():
-            continue
+    primeiro_contrato_col = (
+        pl.col("primeiro_contrato").cast(pl.Utf8).fill_null("None")
+        if "primeiro_contrato" in flagged_with_evidence.columns
+        else pl.lit("None")
+    )
 
-        capital = empresa_row["capital_social"][0]
-        data_abertura = empresa_row["data_abertura"][0]
-        primeiro_contrato = empresa_row["primeiro_contrato"][0] if "primeiro_contrato" in empresa_row.columns else None
-
-        rows.append(
-            {
-                "fk_fornecedor": pk,
-                "fk_socio": None,
-                "tipo_alerta": _TESTA_DE_FERRO,
-                "severidade": _GRAVISSIMO,
-                "descricao": (
-                    "Empresa apresenta perfil composite de testa-de-ferro: "
-                    "capital baixo, entrada rapida em licitacoes, fornecedor exclusivo "
-                    "e socio suspeito"
-                ),
-                "evidencia": (
-                    f"capital_social={capital}, data_abertura={data_abertura}, primeiro_contrato={primeiro_contrato}"
-                ),
-                "detectado_em": detectado_em,
-            }
-        )
-    return rows
+    result_df = flagged_with_evidence.select(
+        pl.col("pk_fornecedor").alias("fk_fornecedor"),
+        pl.lit(None).cast(pl.Int64).alias("fk_socio"),
+        pl.lit(_TESTA_DE_FERRO).alias("tipo_alerta"),
+        pl.lit(_GRAVISSIMO).alias("severidade"),
+        pl.lit(
+            "Empresa apresenta perfil composite de testa-de-ferro: "
+            "capital baixo, entrada rapida em licitacoes, fornecedor exclusivo "
+            "e socio suspeito"
+        ).alias("descricao"),
+        pl.concat_str(
+            [
+                pl.lit("capital_social="),
+                pl.col("capital_social").cast(pl.Utf8),
+                pl.lit(", data_abertura="),
+                pl.col("data_abertura").cast(pl.Utf8),
+                pl.lit(", primeiro_contrato="),
+                primeiro_contrato_col,
+            ]
+        ).alias("evidencia"),
+        pl.lit(detectado_em).alias("detectado_em"),
+    )
+    return result_df.to_dicts()
 
 
 def _empty_alerta_df() -> pl.DataFrame:
