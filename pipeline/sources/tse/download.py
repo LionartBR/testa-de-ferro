@@ -71,9 +71,7 @@ def download_doacoes(url: str, raw_dir: Path, timeout: int = 300) -> Path:
             and "doador_originario" not in n.lower()
         ]
         if not receitas_csvs:
-            raise FileNotFoundError(
-                f"No receitas_candidatos CSV found inside {zip_path}"
-            )
+            raise FileNotFoundError(f"No receitas_candidatos CSV found inside {zip_path}")
         for csv_name in receitas_csvs:
             archive.extract(csv_name, raw_dir)
         log(f"  Extracted {len(receitas_csvs)} receitas_candidatos CSVs")

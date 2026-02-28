@@ -3,7 +3,6 @@
 # Specification tests for Receita Federal CNPJ ingestao.
 from __future__ import annotations
 
-import datetime
 from pathlib import Path
 
 import polars as pl
@@ -30,37 +29,38 @@ def test_parse_empresas_extrai_cnpj_formatado() -> None:
 
 
 def test_parse_empresas_situacao_numerica_vira_enum() -> None:
-    """Situacao 2 maps to ATIVA, 4 maps to INAPTA."""
+    """Situacao is None in Empresas-only parse (comes from Estabelecimentos)."""
     tmp_csv = Path(__file__).parent / "_tmp_situacao.csv"
+    # Empresas file: 7 cols, no header, semicolon, latin1
     tmp_csv.write_text(
-        "CNPJ_BASICO;CNPJ_ORDEM;CNPJ_DV;RAZAO_SOCIAL;SITUACAO_CADASTRAL;CAPITAL_SOCIAL\n"
-        "11222333;0001;81;EMPRESA A;2;1000.00\n"
-        "44555666;0001;72;EMPRESA B;4;500.00\n",
+        "11222333;EMPRESA A;2062;50;1000,00;05;\n44555666;EMPRESA B;2135;50;500,00;01;\n",
         encoding="latin1",
     )
     try:
         df = parse_empresas(tmp_csv)
-        assert df["situacao"][0] == "ATIVA"
-        assert df["situacao"][1] == "INAPTA"
+        # Situacao is not in the Empresas file — set to None, filled from Estabelecimentos later
+        assert df["situacao"][0] is None
+        assert df["situacao"][1] is None
     finally:
         tmp_csv.unlink(missing_ok=True)
 
 
 def test_parse_empresas_todos_codigos_situacao_mapeados() -> None:
-    """Codes 1=NULA, 3=SUSPENSA, 8=BAIXADA are mapped correctly."""
+    """Situacao is None in Empresas-only parse for all rows."""
     tmp_csv = Path(__file__).parent / "_tmp_situacao2.csv"
+    # Empresas file: 7 cols, no header, semicolon, latin1
     tmp_csv.write_text(
-        "CNPJ_BASICO;CNPJ_ORDEM;CNPJ_DV;RAZAO_SOCIAL;SITUACAO_CADASTRAL;CAPITAL_SOCIAL\n"
-        "11222333;0001;81;NULA SA;1;1000.00\n"
-        "22333444;0001;52;SUSPENSA LTDA;3;500.00\n"
-        "33444555;0001;23;BAIXADA ME;8;200.00\n",
+        "11222333;NULA SA;2062;50;1000,00;05;\n"
+        "22333444;SUSPENSA LTDA;2135;50;500,00;01;\n"
+        "33444555;BAIXADA ME;2062;50;200,00;03;\n",
         encoding="latin1",
     )
     try:
         df = parse_empresas(tmp_csv)
-        assert df["situacao"][0] == "NULA"
-        assert df["situacao"][1] == "SUSPENSA"
-        assert df["situacao"][2] == "BAIXADA"
+        # Situacao comes from Estabelecimentos, not Empresas
+        assert df["situacao"][0] is None
+        assert df["situacao"][1] is None
+        assert df["situacao"][2] is None
     finally:
         tmp_csv.unlink(missing_ok=True)
 
@@ -74,17 +74,18 @@ def test_parse_empresas_capital_social_como_float64() -> None:
 
 
 def test_parse_empresas_data_abertura_como_date() -> None:
-    """DATA_INICIO_ATIVIDADE is parsed as a Polars Date type."""
+    """data_abertura is Date type but None (comes from Estabelecimentos, not Empresas)."""
     tmp_csv = Path(__file__).parent / "_tmp_data.csv"
+    # Empresas file: 7 cols, no header, semicolon, latin1
     tmp_csv.write_text(
-        "CNPJ_BASICO;CNPJ_ORDEM;CNPJ_DV;RAZAO_SOCIAL;DATA_INICIO_ATIVIDADE;CAPITAL_SOCIAL\n"
-        "11222333;0001;81;EMPRESA A;20200315;1000.00\n",
+        "11222333;EMPRESA A;2062;50;1000,00;05;\n",
         encoding="latin1",
     )
     try:
         df = parse_empresas(tmp_csv)
         assert df["data_abertura"].dtype == pl.Date
-        assert df["data_abertura"][0] == datetime.date(2020, 3, 15)
+        # data_abertura is not in the Empresas file — set to None, filled from Estabelecimentos later
+        assert df["data_abertura"][0] is None
     finally:
         tmp_csv.unlink(missing_ok=True)
 

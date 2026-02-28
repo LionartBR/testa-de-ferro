@@ -107,22 +107,17 @@ def parse_doacoes(raw_path: Path) -> pl.DataFrame:
         csv_files = sorted(
             f
             for f in raw_path.glob("receitas_candidatos_*.csv")
-            if "doador_originario" not in f.name.lower()
-            and "_brasil" not in f.name.lower()
+            if "doador_originario" not in f.name.lower() and "_brasil" not in f.name.lower()
         )
         if not csv_files:
-            raise FileNotFoundError(
-                f"No receitas_candidatos_*.csv files found in {raw_path}"
-            )
+            raise FileNotFoundError(f"No receitas_candidatos_*.csv files found in {raw_path}")
         frames = [_read_single_csv(f) for f in csv_files]
         raw = pl.concat(frames, how="diagonal_relaxed")
     else:
         raw = _read_single_csv(raw_path)
 
     # Normalise column names: strip whitespace, quotes, and uppercase.
-    raw = raw.rename(
-        {col: col.strip().strip('"').upper() for col in raw.columns}
-    )
+    raw = raw.rename({col: col.strip().strip('"').upper() for col in raw.columns})
 
     n = len(raw)
 
@@ -148,44 +143,27 @@ def parse_doacoes(raw_path: Path) -> pl.DataFrame:
             .then(pl.lit("CNPJ"))
             .otherwise(pl.lit(None))
             .alias("tipo_doador"),
-            pl.when(pl.col("digit_len") == 14)
-            .then(pl.col("doc"))
-            .otherwise(pl.lit(None))
-            .alias("cnpj_doador"),
-            pl.when(pl.col("digit_len") == 11)
-            .then(pl.col("doc"))
-            .otherwise(pl.lit(None))
-            .alias("cpf_doador"),
+            pl.when(pl.col("digit_len") == 14).then(pl.col("doc")).otherwise(pl.lit(None)).alias("cnpj_doador"),
+            pl.when(pl.col("digit_len") == 11).then(pl.col("doc")).otherwise(pl.lit(None)).alias("cpf_doador"),
         ]
     )
 
     # Parse valor as Float64 (vectorized: comma -> dot -> cast).
     if "VR_RECEITA" in raw.columns:
-        valor_series = (
-            raw["VR_RECEITA"]
-            .str.strip_chars()
-            .str.replace(",", ".")
-            .cast(pl.Float64, strict=False)
-        )
+        valor_series = raw["VR_RECEITA"].str.strip_chars().str.replace(",", ".").cast(pl.Float64, strict=False)
     else:
         valor_series = pl.Series("valor", [None] * n, dtype=pl.Float64)
 
     # Parse data_receita as Date (DD/MM/YYYY format from TSE).
     data_series: pl.Series
     if "DT_RECEITA" in raw.columns:
-        data_series = (
-            raw["DT_RECEITA"]
-            .str.strip_chars()
-            .str.to_date(format="%d/%m/%Y", strict=False)
-        )
+        data_series = raw["DT_RECEITA"].str.strip_chars().str.to_date(format="%d/%m/%Y", strict=False)
     else:
         data_series = pl.Series("data_receita", [None] * n, dtype=pl.Date)
 
     # Extract ano_eleicao as Int64 (vectorized: strip -> cast).
     if "AA_ELEICAO" in raw.columns:
-        ano_series = (
-            raw["AA_ELEICAO"].str.strip_chars().cast(pl.Int64, strict=False)
-        )
+        ano_series = raw["AA_ELEICAO"].str.strip_chars().cast(pl.Int64, strict=False)
     else:
         ano_series = pl.Series("ano_eleicao", [None] * n, dtype=pl.Int64)
 
@@ -206,13 +184,9 @@ def parse_doacoes(raw_path: Path) -> pl.DataFrame:
             "tipo_recurso": _safe_series("DS_ORIGEM_RECEITA"),
             "valor": valor_series,
             "data_receita": data_series,
-            "fk_fornecedor": pl.Series(
-                "fk_fornecedor", [None] * n, dtype=pl.Int64
-            ),
+            "fk_fornecedor": pl.Series("fk_fornecedor", [None] * n, dtype=pl.Int64),
             "fk_socio": pl.Series("fk_socio", [None] * n, dtype=pl.Int64),
-            "fk_candidato": pl.Series(
-                "fk_candidato", [None] * n, dtype=pl.Int64
-            ),
+            "fk_candidato": pl.Series("fk_candidato", [None] * n, dtype=pl.Int64),
             "fk_tempo": pl.Series("fk_tempo", [None] * n, dtype=pl.Int64),
         }
     )

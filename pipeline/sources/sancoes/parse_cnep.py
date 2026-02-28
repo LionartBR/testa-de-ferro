@@ -49,9 +49,7 @@ def parse_cnep(raw_path: Path) -> pl.DataFrame:
     )
 
     # Strip surrounding whitespace and quotes from column names, then uppercase.
-    raw = raw.rename(
-        {col: col.strip().strip('"').strip().upper() for col in raw.columns}
-    )
+    raw = raw.rename({col: col.strip().strip('"').strip().upper() for col in raw.columns})
 
     n = len(raw)
 
@@ -64,25 +62,18 @@ def parse_cnep(raw_path: Path) -> pl.DataFrame:
     def _parse_date(col: str) -> pl.Series:
         """Parse DD/MM/YYYY date column. Returns Date or null."""
         if col in raw.columns:
-            return (
-                raw[col]
-                .str.strip_chars()
-                .str.to_date(format="%d/%m/%Y", strict=False)
-            )
+            return raw[col].str.strip_chars().str.to_date(format="%d/%m/%Y", strict=False)
         return pl.Series(col, [None] * n, dtype=pl.Date)
 
     # razao_social: prefer the Receita name, fall back to the sancionado name.
     razao_primary = _safe_str(_COL_RAZAO_SOCIAL)
     razao_fallback = _safe_str(_COL_NOME_SANCIONADO)
-    razao_social = (
-        pl.DataFrame({"primary": razao_primary, "fallback": razao_fallback})
-        .select(
-            pl.when(pl.col("primary").is_not_null() & (pl.col("primary") != ""))
-            .then(pl.col("primary"))
-            .otherwise(pl.col("fallback"))
-            .alias("razao_social")
-        )["razao_social"]
-    )
+    razao_social = pl.DataFrame({"primary": razao_primary, "fallback": razao_fallback}).select(
+        pl.when(pl.col("primary").is_not_null() & (pl.col("primary") != ""))
+        .then(pl.col("primary"))
+        .otherwise(pl.col("fallback"))
+        .alias("razao_social")
+    )["razao_social"]
 
     return pl.DataFrame(
         {

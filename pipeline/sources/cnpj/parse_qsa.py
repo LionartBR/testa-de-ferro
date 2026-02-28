@@ -64,12 +64,7 @@ def parse_qsa(raw_path: Path) -> pl.DataFrame:
     n = len(raw)
 
     # Parse DATA_ENTRADA from YYYYMMDD string to Date.
-    data_entrada = (
-        raw["data_entrada"]
-        .cast(pl.Utf8)
-        .str.strip_chars()
-        .str.to_date(format="%Y%m%d", strict=False)
-    )
+    data_entrada = raw["data_entrada"].cast(pl.Utf8).str.strip_chars().str.to_date(format="%Y%m%d", strict=False)
 
     return pl.DataFrame(
         {

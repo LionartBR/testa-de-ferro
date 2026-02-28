@@ -78,22 +78,11 @@ def parse_empresas(raw_path: Path) -> pl.DataFrame:
 
     # Build a placeholder CNPJ: XX.XXX.XXX/0001-00 (matriz assumed).
     # The real CNPJ_ORDEM and CNPJ_DV come from Estabelecimentos.
-    cnpj_series = (
-        basico.str.slice(0, 2)
-        + "."
-        + basico.str.slice(2, 3)
-        + "."
-        + basico.str.slice(5, 3)
-        + "/0001-00"
-    )
+    cnpj_series = basico.str.slice(0, 2) + "." + basico.str.slice(2, 3) + "." + basico.str.slice(5, 3) + "/0001-00"
 
     # Parse capital social: comma -> dot, then cast to Float64.
     capital_series = (
-        raw["capital_social"]
-        .cast(pl.Utf8)
-        .str.strip_chars()
-        .str.replace(",", ".")
-        .cast(pl.Float64, strict=False)
+        raw["capital_social"].cast(pl.Utf8).str.strip_chars().str.replace(",", ".").cast(pl.Float64, strict=False)
     )
 
     return pl.DataFrame(

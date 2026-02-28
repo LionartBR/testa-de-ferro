@@ -147,10 +147,7 @@ def _extract_from_7z(archive_path: Path, raw_dir: Path) -> Path:
     try:
         import py7zr
     except ImportError as exc:
-        msg = (
-            "py7zr is required to extract RAIS .7z archives. "
-            "Install it with: pip install py7zr"
-        )
+        msg = "py7zr is required to extract RAIS .7z archives. Install it with: pip install py7zr"
         raise ImportError(msg) from exc
 
     with py7zr.SevenZipFile(archive_path, mode="r") as archive:

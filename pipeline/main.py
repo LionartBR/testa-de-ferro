@@ -385,7 +385,6 @@ def _run_sources(config: PipelineConfig) -> None:
     from pipeline.sources.comprasnet.download import download_comprasnet
     from pipeline.sources.comprasnet.parse import parse_comprasnet
     from pipeline.sources.comprasnet.validate import validate_comprasnet
-    from pipeline.sources.juntas_comerciais.download import download_juntas_comerciais
     from pipeline.sources.juntas_comerciais.parse import parse_qsa_diffs
     from pipeline.sources.juntas_comerciais.validate import validate_qsa_diffs
     from pipeline.sources.pncp.download import download_pncp

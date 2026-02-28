@@ -15,8 +15,8 @@ from pathlib import Path
 import polars as pl
 
 from pipeline.sources.sancoes.parse_ceis import parse_ceis
-from pipeline.sources.sancoes.parse_cnep import parse_cnep
 from pipeline.sources.sancoes.parse_cepim import parse_cepim
+from pipeline.sources.sancoes.parse_cnep import parse_cnep
 from pipeline.sources.sancoes.validate import validate_sancoes
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
