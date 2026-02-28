@@ -36,6 +36,9 @@ from decimal import Decimal
 
 import polars as pl
 
+from pipeline.transform.cnae_mapping import cnae_incompativel_com_objeto, get_cnae_category
+from pipeline.transform.cruzamentos import detectar_mesmo_endereco
+
 # ---------------------------------------------------------------------------
 # Weight constants — source of truth: api/domain/fornecedor/score.py :: PESOS
 # ---------------------------------------------------------------------------
@@ -69,12 +72,14 @@ def calcular_scores_batch(
     Args:
         empresas_df:  DataFrame with dim_fornecedor columns, including:
                       pk_fornecedor (int), cnpj_basico (str), capital_social (float|null),
-                      data_abertura (date|null), cnpj (str).
+                      data_abertura (date|null), cnpj (str), cnae_principal (str|null),
+                      logradouro (str|null).
         socios_df:    DataFrame with: cnpj_basico (str), nome_socio (str),
                       qtd_empresas_governo (int) — must have been enriched by
                       cruzamentos.enriquecer_socios before calling this function.
         contratos_df: DataFrame with: fk_fornecedor (int), valor (float),
-                      data_assinatura (date|null), fk_orgao (int|str).
+                      data_assinatura (date|null), fk_orgao (int|str),
+                      objeto_categoria (str|null).
         sancoes_df:   DataFrame with: fk_fornecedor (int), data_fim (date|null).
 
     Returns:
@@ -90,6 +95,9 @@ def calcular_scores_batch(
     rows.extend(_sancao_historica_batch(empresas_df, sancoes_df, calculado_em))
     rows.extend(_socio_em_multiplas_batch(empresas_df, socios_df, calculado_em))
     rows.extend(_fornecedor_exclusivo_batch(empresas_df, contratos_df, calculado_em))
+    rows.extend(_cnae_incompativel_batch(empresas_df, contratos_df, calculado_em))
+    rows.extend(_mesmo_endereco_batch(empresas_df, calculado_em))
+    rows.extend(_crescimento_subito_batch(empresas_df, contratos_df, calculado_em))
 
     if not rows:
         return _empty_score_df()
@@ -372,6 +380,182 @@ def _fornecedor_exclusivo_batch(
                 "peso": _PESO_FORNECEDOR_EXCLUSIVO,
                 "descricao": (f"Todos os {row['qtd_contratos']} contrato(s) sao com o mesmo orgao"),
                 "evidencia": (f"orgao_codigo={row['orgao_unico']}, qtd_contratos={row['qtd_contratos']}"),
+                "calculado_em": calculado_em,
+            }
+        )
+    return rows
+
+
+def _cnae_incompativel_batch(
+    empresas_df: pl.DataFrame,
+    contratos_df: pl.DataFrame,
+    calculado_em: datetime,
+) -> list[dict[str, object]]:
+    """CNAE_INCOMPATIVEL: company CNAE is incompatible with contract object category."""
+    if contratos_df.is_empty() or "cnae_principal" not in empresas_df.columns:
+        return []
+    if "objeto_categoria" not in contratos_df.columns:
+        return []
+    if "pk_fornecedor" not in empresas_df.columns:
+        return []
+
+    # Get distinct (fk_fornecedor, objeto_categoria) pairs from contracts.
+    categorias = (
+        contratos_df.filter(pl.col("objeto_categoria").is_not_null())
+        .select(["fk_fornecedor", "objeto_categoria"])
+        .unique()
+    )
+
+    if categorias.is_empty():
+        return []
+
+    # Join against empresas to get cnae_principal.
+    joined = categorias.join(
+        empresas_df.select(["pk_fornecedor", "cnae_principal"]).filter(pl.col("cnae_principal").is_not_null()),
+        left_on="fk_fornecedor",
+        right_on="pk_fornecedor",
+        how="inner",
+    )
+
+    if joined.is_empty():
+        return []
+
+    rows: list[dict[str, object]] = []
+    seen: set[int] = set()
+
+    for row in joined.iter_rows(named=True):
+        fk = row["fk_fornecedor"]
+        if fk in seen:
+            continue
+        cnae = row["cnae_principal"]
+        obj_cat = row["objeto_categoria"]
+        if cnae_incompativel_com_objeto(cnae, obj_cat):
+            seen.add(fk)
+            cat = get_cnae_category(cnae)
+            rows.append(
+                {
+                    "fk_fornecedor": fk,
+                    "indicador": "CNAE_INCOMPATIVEL",
+                    "peso": _PESO_CNAE_INCOMPATIVEL,
+                    "descricao": (f"CNAE {cnae} ({cat}) incompativel com objeto contratado ({obj_cat})"),
+                    "evidencia": f"cnae={cnae}, categoria_cnae={cat}, objeto_categoria={obj_cat}",
+                    "calculado_em": calculado_em,
+                }
+            )
+    return rows
+
+
+def _mesmo_endereco_batch(
+    empresas_df: pl.DataFrame,
+    calculado_em: datetime,
+) -> list[dict[str, object]]:
+    """MESMO_ENDERECO: company shares address with another government supplier."""
+    if "logradouro" not in empresas_df.columns or "cnpj" not in empresas_df.columns:
+        return []
+    if "pk_fornecedor" not in empresas_df.columns:
+        return []
+
+    pairs = detectar_mesmo_endereco(empresas_df)
+
+    if pairs.is_empty():
+        return []
+
+    # Map CNPJs back to pk_fornecedor.
+    cnpj_to_pk = dict(
+        zip(
+            empresas_df["cnpj"].to_list(),
+            empresas_df["pk_fornecedor"].to_list(),
+            strict=False,
+        )
+    )
+
+    # Collect unique fornecedores that share an address with at least one other.
+    flagged: dict[int, tuple[str, str]] = {}
+    for row in pairs.iter_rows(named=True):
+        cnpj_a = row["cnpj_a"]
+        cnpj_b = row["cnpj_b"]
+        endereco = row["endereco_compartilhado"]
+        pk_a = cnpj_to_pk.get(cnpj_a)
+        pk_b = cnpj_to_pk.get(cnpj_b)
+        if pk_a is not None and pk_a not in flagged:
+            flagged[pk_a] = (cnpj_b, endereco)
+        if pk_b is not None and pk_b not in flagged:
+            flagged[pk_b] = (cnpj_a, endereco)
+
+    rows: list[dict[str, object]] = []
+    for fk, (cnpj_parceiro, endereco) in flagged.items():
+        rows.append(
+            {
+                "fk_fornecedor": fk,
+                "indicador": "MESMO_ENDERECO",
+                "peso": _PESO_MESMO_ENDERECO,
+                "descricao": f"Compartilha endereco com {cnpj_parceiro}",
+                "evidencia": f"endereco={endereco}, cnpj_parceiro={cnpj_parceiro}",
+                "calculado_em": calculado_em,
+            }
+        )
+    return rows
+
+
+def _crescimento_subito_batch(
+    empresas_df: pl.DataFrame,
+    contratos_df: pl.DataFrame,
+    calculado_em: datetime,
+) -> list[dict[str, object]]:
+    """CRESCIMENTO_SUBITO: contract value jumps 5x+ between consecutive years."""
+    if contratos_df.is_empty() or "data_assinatura" not in contratos_df.columns:
+        return []
+    if "valor" not in contratos_df.columns or "fk_fornecedor" not in contratos_df.columns:
+        return []
+
+    # Compute annual contract value per fornecedor.
+    with_year = contratos_df.filter(pl.col("data_assinatura").is_not_null()).with_columns(
+        pl.col("data_assinatura").cast(pl.Date).dt.year().alias("ano")
+    )
+
+    if with_year.is_empty():
+        return []
+
+    anuais = with_year.group_by(["fk_fornecedor", "ano"]).agg(
+        pl.col("valor").cast(pl.Float64).sum().alias("valor_anual")
+    )
+
+    # Self-join: compare year N with year N-1.
+    prev = anuais.rename({"ano": "ano_prev", "valor_anual": "valor_prev"})
+    curr = anuais.with_columns((pl.col("ano") - 1).alias("ano_prev_join"))
+
+    joined = curr.join(
+        prev,
+        left_on=["fk_fornecedor", "ano_prev_join"],
+        right_on=["fk_fornecedor", "ano_prev"],
+        how="inner",
+    )
+
+    # Flag when current year >= 5x previous year and previous year > 0.
+    flagged = joined.filter((pl.col("valor_prev") > 0) & (pl.col("valor_anual") >= pl.col("valor_prev") * 5))
+
+    if flagged.is_empty():
+        return []
+
+    known_fornecedores = set(empresas_df["pk_fornecedor"].to_list())
+
+    # Take the most recent jump per fornecedor.
+    dedup = flagged.sort("ano", descending=True).unique(subset=["fk_fornecedor"], keep="first")
+    dedup = dedup.filter(pl.col("fk_fornecedor").is_in(list(known_fornecedores)))
+
+    rows: list[dict[str, object]] = []
+    for row in dedup.iter_rows(named=True):
+        razao = row["valor_anual"] / row["valor_prev"] if row["valor_prev"] > 0 else 0
+        rows.append(
+            {
+                "fk_fornecedor": row["fk_fornecedor"],
+                "indicador": "CRESCIMENTO_SUBITO",
+                "peso": _PESO_CRESCIMENTO_SUBITO,
+                "descricao": (f"Valor contratado saltou {razao:.1f}x entre {row['ano'] - 1} e {row['ano']}"),
+                "evidencia": (
+                    f"ano_anterior={row['ano'] - 1}, valor_anterior={row['valor_prev']:.2f}, "
+                    f"ano_atual={row['ano']}, valor_atual={row['valor_anual']:.2f}, razao={razao:.1f}x"
+                ),
                 "calculado_em": calculado_em,
             }
         )

@@ -32,6 +32,7 @@ from pipeline.output.completude import validar_completude
 from pipeline.staging.parquet_writer import read_parquet, write_parquet
 from pipeline.transform.alertas import detectar_alertas_batch
 from pipeline.transform.cruzamentos import enriquecer_socios
+from pipeline.transform.grafo_societario import construir_grafo
 from pipeline.transform.hmac_cpf import apply_hmac_to_df
 from pipeline.transform.match_servidor_socio import match_servidor_socio
 from pipeline.transform.score import calcular_scores_batch
@@ -94,7 +95,20 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
     write_parquet(alertas_df, staging_dir / "alertas.parquet")
     log(f"  Alertas: {len(alertas_df):,} rows")
 
-    # 6. Write enriched socios to staging — rename to match dim_socio schema
+    # 6. Denormalize aggregate columns into empresas (dim_fornecedor)
+    log("Denormalizing dim_fornecedor aggregates...")
+    empresas_df = _denormalize_fornecedor(empresas_df, scores_df, alertas_df, contratos_df)
+    write_parquet(empresas_df, staging_dir / "empresas.parquet")
+    log(f"  Denormalized {len(empresas_df):,} fornecedores")
+
+    # 7. Build corporate graph
+    log("Building corporate graph...")
+    nos_df, arestas_df = construir_grafo(socios_enriched, empresas_df)
+    write_parquet(nos_df, staging_dir / "grafo_nos.parquet")
+    write_parquet(arestas_df, staging_dir / "grafo_arestas.parquet")
+    log(f"  Grafo: {len(nos_df):,} nodes, {len(arestas_df):,} edges")
+
+    # 8. Write enriched socios to staging — rename to match dim_socio schema
     socios_for_staging = _prepare_socios_staging(socios_enriched)
     write_parquet(socios_for_staging, staging_dir / "socios.parquet")
 
@@ -142,6 +156,112 @@ def _prepare_socios_staging(socios_df: pl.DataFrame) -> pl.DataFrame:
             "qtd_empresas_governo": qtd_empresas,
         }
     )
+
+
+def _denormalize_fornecedor(
+    empresas_df: pl.DataFrame,
+    scores_df: pl.DataFrame,
+    alertas_df: pl.DataFrame,
+    contratos_df: pl.DataFrame,
+) -> pl.DataFrame:
+    """Compute denormalized aggregate columns for dim_fornecedor.
+
+    Populates: score_risco, faixa_risco, qtd_alertas, max_severidade,
+    total_contratos, valor_total — all derived from the pre-computed
+    scores, alerts, and contracts DataFrames.
+    """
+    pk_col = "pk_fornecedor"
+
+    # --- Score: sum of pesos per fornecedor ---
+    if not scores_df.is_empty() and "fk_fornecedor" in scores_df.columns:
+        score_agg = scores_df.group_by("fk_fornecedor").agg(pl.col("peso").sum().alias("score_risco"))
+    else:
+        score_agg = pl.DataFrame(
+            {"fk_fornecedor": pl.Series([], dtype=pl.Int64), "score_risco": pl.Series([], dtype=pl.Int64)}
+        )
+
+    # --- Alertas: count + max severidade ---
+    if not alertas_df.is_empty() and "fk_fornecedor" in alertas_df.columns:
+        # Map severidade to a numeric rank for MAX aggregation: GRAVISSIMO=2, GRAVE=1, else 0.
+        alertas_ranked = alertas_df.with_columns(
+            pl.when(pl.col("severidade") == "GRAVISSIMO")
+            .then(2)
+            .when(pl.col("severidade") == "GRAVE")
+            .then(1)
+            .otherwise(0)
+            .alias("_sev_rank")
+        )
+        alerta_agg = alertas_ranked.group_by("fk_fornecedor").agg(
+            [
+                pl.len().alias("qtd_alertas"),
+                pl.col("_sev_rank").max().alias("_max_rank"),
+            ]
+        )
+        # Map rank back to string
+        alerta_agg = alerta_agg.with_columns(
+            pl.when(pl.col("_max_rank") == 2)
+            .then(pl.lit("GRAVISSIMO"))
+            .when(pl.col("_max_rank") == 1)
+            .then(pl.lit("GRAVE"))
+            .otherwise(pl.lit(None))
+            .alias("max_severidade")
+        ).drop("_max_rank")
+    else:
+        alerta_agg = pl.DataFrame(
+            {
+                "fk_fornecedor": pl.Series([], dtype=pl.Int64),
+                "qtd_alertas": pl.Series([], dtype=pl.Int64),
+                "max_severidade": pl.Series([], dtype=pl.Utf8),
+            }
+        )
+
+    # --- Contratos: count + total value ---
+    if not contratos_df.is_empty() and "fk_fornecedor" in contratos_df.columns:
+        contrato_agg = contratos_df.group_by("fk_fornecedor").agg(
+            [
+                pl.len().alias("total_contratos"),
+                pl.col("valor").cast(pl.Float64).sum().alias("valor_total"),
+            ]
+        )
+    else:
+        contrato_agg = pl.DataFrame(
+            {
+                "fk_fornecedor": pl.Series([], dtype=pl.Int64),
+                "total_contratos": pl.Series([], dtype=pl.Int64),
+                "valor_total": pl.Series([], dtype=pl.Float64),
+            }
+        )
+
+    # --- Join aggregates onto empresas ---
+    result = empresas_df.join(score_agg, left_on=pk_col, right_on="fk_fornecedor", how="left")
+    result = result.join(alerta_agg, left_on=pk_col, right_on="fk_fornecedor", how="left")
+    result = result.join(contrato_agg, left_on=pk_col, right_on="fk_fornecedor", how="left")
+
+    # Fill nulls with defaults
+    result = result.with_columns(
+        [
+            pl.col("score_risco").fill_null(0).cast(pl.Int16),
+            pl.col("qtd_alertas").fill_null(0).cast(pl.Int16),
+            pl.col("total_contratos").fill_null(0).cast(pl.Int32),
+            pl.col("valor_total").fill_null(0.0),
+        ]
+    )
+
+    # Compute faixa_risco from score_risco
+    result = result.with_columns(
+        pl.when(pl.col("score_risco") >= 70)
+        .then(pl.lit("Critico"))
+        .when(pl.col("score_risco") >= 50)
+        .then(pl.lit("Alto"))
+        .when(pl.col("score_risco") >= 30)
+        .then(pl.lit("Medio"))
+        .when(pl.col("score_risco") >= 10)
+        .then(pl.lit("Baixo"))
+        .otherwise(pl.lit("Minimo"))
+        .alias("faixa_risco")
+    )
+
+    return result
 
 
 def _run_sources(config: PipelineConfig) -> None:
