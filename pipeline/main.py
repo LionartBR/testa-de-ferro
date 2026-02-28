@@ -181,8 +181,7 @@ def _run_sources(config: PipelineConfig) -> None:
 
     # ---- Phase 1: Parallel downloads ----
     log("Downloading all sources in parallel...")
-    DownloadFn = Callable[[str, Path, int], Path]
-    download_tasks: dict[str, tuple[DownloadFn, str, Path, int]] = {
+    download_tasks: dict[str, tuple[Callable[[str, Path, int], Path], str, Path, int]] = {
         "cnpj_empresas": (download_cnpj, urls.cnpj_empresas, raw_dir / "cnpj", t),
         "cnpj_qsa": (download_cnpj, urls.cnpj_qsa, raw_dir / "cnpj_qsa", t),
         "pncp": (download_pncp, urls.pncp_contratos, raw_dir / "pncp", t),
