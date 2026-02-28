@@ -30,6 +30,10 @@ from __future__ import annotations
 
 import polars as pl
 
+# Maximum per-sócio company count before excluding from the level-1 self-join.
+# Sócios appearing in more than this many companies would produce O(n²) pairs.
+_MAX_SOCIO_DEGREE = 100
+
 
 def construir_grafo(
     socios_df: pl.DataFrame,
@@ -122,7 +126,6 @@ def construir_grafo(
     # are still included as Level 0 nodes (sócio → empresa), so no
     # information is lost — only the sibling-empresa edges are skipped.
     # ------------------------------------------------------------------
-    _MAX_SOCIO_DEGREE = 100
     degree = socios_joined.group_by("_socio_id").agg(pl.len().alias("_deg"))
     socios_for_level1 = socios_joined.join(
         degree.filter(pl.col("_deg") <= _MAX_SOCIO_DEGREE),

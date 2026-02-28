@@ -500,9 +500,9 @@ def _run_sources(config: PipelineConfig) -> None:
             pool.submit(_parse_and_write, fn, path): name
             for name, (fn, path) in parse_tasks.items()
         }
-        for future in as_completed(parse_futures):
-            name = parse_futures[future]
-            count = future.result()  # raises on error, aborting the pipeline
+        for parse_future in as_completed(parse_futures):
+            name = parse_futures[parse_future]
+            count = parse_future.result()  # raises on error, aborting the pipeline
             log(f"  Parsed {name}: {count:,} rows")
 
 
