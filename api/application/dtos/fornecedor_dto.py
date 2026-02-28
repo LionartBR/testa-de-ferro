@@ -16,3 +16,15 @@ class SancaoDTO(BaseModel):
     data_inicio: str
     data_fim: str | None
     vigente: bool
+
+
+class FornecedorResumoDTO(BaseModel):
+    cnpj: str
+    razao_social: str
+    situacao: str
+    score_risco: int
+    faixa_risco: str
+    qtd_alertas: int
+    max_severidade: str | None
+    total_contratos: int
+    valor_total: str

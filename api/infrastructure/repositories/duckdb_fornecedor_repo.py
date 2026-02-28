@@ -45,6 +45,11 @@ class DuckDBFornecedorRepo:
         ).fetchall()
         return [self._hidratar(r) for r in rows]
 
+    def contar_total(self) -> int:
+        """SELECT count(*) FROM dim_fornecedor."""
+        row = self._conn.execute("SELECT count(*) FROM dim_fornecedor").fetchone()
+        return int(row[0]) if row else 0
+
     def _hidratar(self, row: tuple) -> Fornecedor:  # type: ignore[type-arg]
         """Mapeia row do DuckDB para entidade de dominio.
         Colunas: pk(0), cnpj(1), razao_social(2), data_abertura(3),

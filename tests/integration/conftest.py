@@ -1,6 +1,7 @@
 # tests/integration/conftest.py
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 from pathlib import Path
 
@@ -9,6 +10,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 SCHEMA_PATH = Path(__file__).parent.parent.parent / "pipeline" / "output" / "schema.sql"
+
+# Desabilitar rate limit em testes
+os.environ["API_RATE_LIMIT_PER_MINUTE"] = "0"
 
 
 @pytest.fixture(scope="session")
@@ -49,10 +53,11 @@ def test_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
         (2, 2, '2010-06-01', NULL, 100.00)
     """)
 
-    # --- Orgao ---
+    # --- Orgaos ---
     conn.execute("""
         INSERT INTO dim_orgao VALUES
-        (1, '26000', 'Ministerio da Educacao', 'MEC', 'Executivo', 'Federal', 'DF')
+        (1, '26000', 'Ministerio da Educacao', 'MEC', 'Executivo', 'Federal', 'DF'),
+        (2, '54000', 'Ministerio da Fazenda', 'MF', 'Executivo', 'Federal', 'DF')
     """)
 
     # --- Tempo ---
@@ -61,11 +66,26 @@ def test_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
         (1, '2025-06-01', 2025, 6, 2, 1, 1, 'Junho')
     """)
 
+    # --- Candidato (para futura doacao) ---
+    conn.execute("""
+        INSERT INTO dim_candidato VALUES
+        (1, 'Dep. Fulano', 'hmac_candidato1', 'PXX', 'Deputado Federal', 'SP', 2022)
+    """)
+
     # --- Contratos ---
     conn.execute("""
         INSERT INTO fato_contrato VALUES
         (1, 1, 1, 1, NULL, 250000.00, 'Servicos de TI', 'PE-001/2025', '2025-06-01', '2026-06-01'),
-        (2, 1, 1, 1, NULL, 500000.00, 'Manutencao sistemas', 'PE-002/2025', '2025-06-15', '2026-06-15')
+        (2, 1, 1, 1, NULL, 500000.00, 'Manutencao sistemas', 'PE-002/2025', '2025-06-15', '2026-06-15'),
+        (3, 2, 2, 1, NULL, 1000000.00, 'Compra de material', 'PE-003/2025', '2025-06-20', '2026-06-20'),
+        (4, 2, 2, 1, NULL, 500000.00, 'Compra de equipamento', 'PE-003/2025', '2025-07-01', '2026-07-01'),
+        (5, 2, 1, 1, NULL, 500000.00, 'Servicos gerais', 'PE-004/2025', '2025-08-01', '2026-08-01')
+    """)
+
+    # --- Doacao ---
+    conn.execute("""
+        INSERT INTO fato_doacao VALUES
+        (1, 1, NULL, 1, 1, 15000.00, 'Transferencia', 2022)
     """)
 
     # --- Sancoes (1 vigente, 1 expirada) ---
@@ -88,6 +108,12 @@ def test_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
          CURRENT_TIMESTAMP)
     """)
 
+    # --- Score detalhe ---
+    conn.execute("""
+        INSERT INTO fato_score_detalhe VALUES
+        (1, 1, 'CAPITAL_SOCIAL_BAIXO', 15, 'Capital desproporcional', 'capital=1000', CURRENT_TIMESTAMP)
+    """)
+
     yield conn
     conn.close()
 
@@ -97,6 +123,10 @@ def client(test_db: duckdb.DuckDBPyConnection) -> Generator[TestClient, None, No
     """TestClient do FastAPI com DuckDB in-memory injetado."""
     from api.infrastructure import duckdb_connection
     duckdb_connection.set_connection(test_db)
+
+    # Limpar cache de settings para pegar API_RATE_LIMIT_PER_MINUTE=0
+    from api.infrastructure.config import get_settings
+    get_settings.cache_clear()
 
     from api.interfaces.api.main import app
     with TestClient(app) as c:
