@@ -143,14 +143,12 @@ def _prepare_socios_staging(socios_df: pl.DataFrame) -> pl.DataFrame:
 def _run_sources(config: PipelineConfig) -> None:
     """Download, parse, and validate all data sources to staging parquets.
 
-    Each source follows the same pattern:
-        1. Download raw data to raw_dir
-        2. Parse raw data into a Polars DataFrame
-        3. Validate and clean the DataFrame
-        4. Write the staging parquet
-
-    Sources are run sequentially. Errors in any source abort the pipeline.
+    Downloads run in parallel (ThreadPoolExecutor) since they are IO-bound.
+    Parse + validate run sequentially after all downloads complete.
+    Errors in any source abort the pipeline.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     from pipeline.sources.cnpj.download import download_cnpj
     from pipeline.sources.cnpj.parse_empresas import parse_empresas
     from pipeline.sources.cnpj.parse_qsa import parse_qsa
@@ -174,47 +172,56 @@ def _run_sources(config: PipelineConfig) -> None:
     staging_dir = config.staging_dir
     raw_dir.mkdir(parents=True, exist_ok=True)
     urls = config.source_urls
+    t = config.download_timeout
 
-    # ---- CNPJ (Empresas + QSA) ----
-    _log("Source: CNPJ empresas...")
-    cnpj_raw = download_cnpj(urls.cnpj_empresas, raw_dir, config.download_timeout)
-    empresas_df = validate_empresas(parse_empresas(cnpj_raw))
+    # ---- Phase 1: Parallel downloads ----
+    _log("Downloading all sources in parallel...")
+    download_tasks = {
+        "cnpj_empresas": (download_cnpj, urls.cnpj_empresas, raw_dir / "cnpj", t),
+        "cnpj_qsa": (download_cnpj, urls.cnpj_qsa, raw_dir / "cnpj_qsa", t),
+        "pncp": (download_pncp, urls.pncp_contratos, raw_dir / "pncp", t),
+        "ceis": (download_ceis, urls.ceis, raw_dir / "ceis", t),
+        "cnep": (download_cnep, urls.cnep, raw_dir / "cnep", t),
+        "cepim": (download_cepim, urls.cepim, raw_dir / "cepim", t),
+        "servidores": (download_servidores, urls.servidores, raw_dir / "servidores", t),
+        "tse": (download_doacoes, urls.tse_doacoes, raw_dir / "tse", t),
+    }
+
+    raw_paths: dict[str, Path] = {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        future_to_name = {
+            pool.submit(fn, url, dest, timeout): name
+            for name, (fn, url, dest, timeout) in download_tasks.items()
+        }
+        for future in as_completed(future_to_name):
+            name = future_to_name[future]
+            raw_paths[name] = future.result()  # raises on error
+            _log(f"  Downloaded: {name}")
+
+    # ---- Phase 2: Parse + validate (sequential, CPU-bound) ----
+    _log("Parsing and validating...")
+
+    empresas_df = validate_empresas(parse_empresas(raw_paths["cnpj_empresas"]))
     write_parquet(empresas_df, staging_dir / "empresas.parquet")
 
-    _log("Source: CNPJ QSA...")
-    qsa_raw = download_cnpj(urls.cnpj_qsa, raw_dir, config.download_timeout)
-    qsa_df = validate_qsa(parse_qsa(qsa_raw))
+    qsa_df = validate_qsa(parse_qsa(raw_paths["cnpj_qsa"]))
     write_parquet(qsa_df, staging_dir / "qsa.parquet")
 
-    # ---- PNCP (Contratos) ----
-    _log("Source: PNCP contratos...")
-    pncp_raw = download_pncp(urls.pncp_contratos, raw_dir, config.download_timeout)
-    contratos_df = validate_contratos(parse_contratos(pncp_raw))
+    contratos_df = validate_contratos(parse_contratos(raw_paths["pncp"]))
     write_parquet(contratos_df, staging_dir / "contratos.parquet")
 
-    # ---- Sancoes (CEIS + CNEP + CEPIM) ----
-    _log("Source: Sanções...")
-    ceis_raw = download_ceis(urls.ceis, raw_dir / "ceis", config.download_timeout)
-    cnep_raw = download_cnep(urls.cnep, raw_dir / "cnep", config.download_timeout)
-    cepim_raw = download_cepim(urls.cepim, raw_dir / "cepim", config.download_timeout)
     sancoes_all = pl.concat([
-        parse_ceis(ceis_raw),
-        parse_cnep(cnep_raw),
-        parse_cepim(cepim_raw),
+        parse_ceis(raw_paths["ceis"]),
+        parse_cnep(raw_paths["cnep"]),
+        parse_cepim(raw_paths["cepim"]),
     ])
     sancoes_df = validate_sancoes(sancoes_all)
     write_parquet(sancoes_df, staging_dir / "sancoes.parquet")
 
-    # ---- Servidores ----
-    _log("Source: Servidores...")
-    serv_raw = download_servidores(urls.servidores, raw_dir, config.download_timeout)
-    servidores_df = validate_servidores(parse_servidores(serv_raw))
+    servidores_df = validate_servidores(parse_servidores(raw_paths["servidores"]))
     write_parquet(servidores_df, staging_dir / "servidores.parquet")
 
-    # ---- TSE (Doações) ----
-    _log("Source: TSE doações...")
-    tse_raw = download_doacoes(urls.tse_doacoes, raw_dir, config.download_timeout)
-    doacoes_df = validate_doacoes(parse_doacoes(tse_raw))
+    doacoes_df = validate_doacoes(parse_doacoes(raw_paths["tse"]))
     write_parquet(doacoes_df, staging_dir / "doacoes.parquet")
 
 

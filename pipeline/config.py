@@ -37,12 +37,12 @@ class SourceUrls:
     """
 
     cnpj_empresas: str = (
-        "https://dadosabertos.rfb.gov.br/CNPJ/dados_abertos_cnpj/2024-01/Empresas0.zip"
+        "https://arquivos.receitafederal.gov.br/public.php/webdav/2026-02/Empresas0.zip"
     )
     cnpj_qsa: str = (
-        "https://dadosabertos.rfb.gov.br/CNPJ/dados_abertos_cnpj/2024-01/Socios0.zip"
+        "https://arquivos.receitafederal.gov.br/public.php/webdav/2026-02/Socios0.zip"
     )
-    pncp_contratos: str = "https://pncp.gov.br/api/pncp/v1/contratos"
+    pncp_contratos: str = "https://pncp.gov.br/api/consulta/v1/contratos"
     comprasnet_base: str = "https://dadosabertos.compras.gov.br/modulo-download"
     tse_doacoes: str = (
         "https://cdn.tse.jus.br/estatistica/sead/odsele/prestacao_contas"
