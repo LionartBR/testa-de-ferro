@@ -9,6 +9,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pipeline.sources.pncp._record import CONTRATOS_SCHEMA, build_window_df
 from pipeline.sources.pncp.parse import parse_contratos
 from pipeline.sources.pncp.validate import validate_contratos
 
@@ -141,3 +142,76 @@ def test_validate_rejeita_valor_negativo() -> None:
 
     assert len(result) == 1
     assert result["valor"][0] == pytest.approx(1000.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests for Parquet directory workflow (streaming download output)
+# ---------------------------------------------------------------------------
+
+
+def _make_raw_record(
+    num: str = "C-001",
+    cnpj: str = "11.222.333/0001-81",
+    orgao_cnpj: str = "ORG1",
+    valor: float = 1000.0,
+    data_assinatura: str = "2024-01-15",
+) -> dict:
+    """Build a minimal raw PNCP API record for testing."""
+    return {
+        "numeroContratoEmpenho": num,
+        "fornecedor": {"cnpjFormatado": cnpj},
+        "orgaoEntidade": {"cnpj": orgao_cnpj, "razaoSocial": "ORGAO TESTE"},
+        "valorInicial": valor,
+        "dataAssinatura": data_assinatura,
+        "dataVigencia": None,
+        "objetoContrato": f"Objeto {num}",
+        "modalidadeNome": None,
+        "modalidadeCodigo": None,
+    }
+
+
+def test_parse_contratos_aceita_diretorio_com_parquets(tmp_path: Path) -> None:
+    """parse_contratos reads directory of Parquet files correctly."""
+    records_a = [_make_raw_record(num="C-001", valor=1000.0)]
+    records_b = [_make_raw_record(num="C-002", valor=2000.0, data_assinatura="2024-02-20")]
+
+    build_window_df(records_a).write_parquet(tmp_path / "window_20240101_20240201.parquet")
+    build_window_df(records_b).write_parquet(tmp_path / "window_20240201_20240301.parquet")
+
+    result = parse_contratos(tmp_path)
+
+    assert len(result) == 2
+    assert set(result.columns) >= set(CONTRATOS_SCHEMA.keys())
+    assert result["data_assinatura"].dtype == pl.Date
+    assert result["valor"].dtype == pl.Float64
+
+
+def test_parse_contratos_diretorio_vazio_retorna_schema_correto(tmp_path: Path) -> None:
+    """Empty directory returns DataFrame with correct schema, 0 rows."""
+    result = parse_contratos(tmp_path)
+
+    assert len(result) == 0
+    for col, dtype in CONTRATOS_SCHEMA.items():
+        assert col in result.columns
+        assert result[col].dtype == dtype
+
+
+def test_build_window_df_tipos_corretos() -> None:
+    """build_window_df casts dates and valor to correct types."""
+    records = [_make_raw_record(data_assinatura="2024-06-01", valor=5500.50)]
+    df = build_window_df(records)
+
+    assert df["data_assinatura"].dtype == pl.Date
+    assert df["data_assinatura"][0] == datetime.date(2024, 6, 1)
+    assert df["valor"].dtype == pl.Float64
+    assert df["valor"][0] == pytest.approx(5500.50)
+    assert df["fk_fornecedor"].is_null().all()
+
+
+def test_build_window_df_offset_incrementa_pk() -> None:
+    """build_window_df with offset starts pk_contrato from offset+1."""
+    records = [_make_raw_record(), _make_raw_record(num="C-002")]
+    df = build_window_df(records, offset=100)
+
+    assert df["pk_contrato"][0] == 101
+    assert df["pk_contrato"][1] == 102

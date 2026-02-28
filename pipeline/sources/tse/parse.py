@@ -18,6 +18,8 @@
 #   - valor is parsed as Float64; zero and negative values are dropped at
 #     the validate step.
 #   - data_receita uses ISO-8601 format (YYYY-MM-DD) from TSE exports.
+#   - All column construction uses Polars Series/expressions instead of Python
+#     lists (.to_list()) to avoid duplicating data in RAM (~750 MB savings).
 #
 # Invariants:
 #   - tipo_doador is either "CPF" or "CNPJ" or None.
@@ -74,34 +76,35 @@ def parse_doacoes(raw_path: Path) -> pl.DataFrame:
 
     n = len(raw)
 
-    def _safe_str_list(col: str) -> list[str | None]:
-        if col not in raw.columns:
-            return [None] * n
-        return raw[col].str.strip_chars().to_list()
+    def _safe_series(col: str) -> pl.Series:
+        if col in raw.columns:
+            return raw[col].str.strip_chars()
+        return pl.Series(col, [None] * n, dtype=pl.Utf8)
 
-    # Classify donor type from raw document string.
-    doc_raw_list: list[str | None] = _safe_str_list("CPF_CNPJ_DOADOR")
-    tipo_doador_list: list[str | None] = [classificar_doador(d) for d in doc_raw_list]
-    cnpj_doador_list: list[str | None] = [
-        d if t == "CNPJ" else None for d, t in zip(doc_raw_list, tipo_doador_list, strict=False)
-    ]
-    cpf_doador_list: list[str | None] = [
-        d if t == "CPF" else None for d, t in zip(doc_raw_list, tipo_doador_list, strict=False)
-    ]
+    # Classify donor type from raw document string (vectorized).
+    doc_series = _safe_series("CPF_CNPJ_DOADOR")
+    digits = doc_series.str.replace_all(r"[^\d]", "")
+    digit_len = digits.str.len_chars()
 
-    # Parse valor as float.
-    valor_list: list[float | None] = []
+    _doador_tmp = pl.DataFrame({"doc": doc_series, "digit_len": digit_len})
+    _doador_tmp = _doador_tmp.with_columns(
+        [
+            pl.when(pl.col("digit_len") == 11)
+            .then(pl.lit("CPF"))
+            .when(pl.col("digit_len") == 14)
+            .then(pl.lit("CNPJ"))
+            .otherwise(pl.lit(None))
+            .alias("tipo_doador"),
+            pl.when(pl.col("digit_len") == 14).then(pl.col("doc")).otherwise(pl.lit(None)).alias("cnpj_doador"),
+            pl.when(pl.col("digit_len") == 11).then(pl.col("doc")).otherwise(pl.lit(None)).alias("cpf_doador"),
+        ]
+    )
+
+    # Parse valor as Float64 (vectorized: comma → dot → cast).
     if "VALOR_RECEITA" in raw.columns:
-        for v in raw["VALOR_RECEITA"].to_list():
-            if v is None:
-                valor_list.append(None)
-            else:
-                try:
-                    valor_list.append(float(str(v).replace(",", ".")))
-                except ValueError:
-                    valor_list.append(None)
+        valor_series = raw["VALOR_RECEITA"].str.strip_chars().str.replace(",", ".").cast(pl.Float64, strict=False)
     else:
-        valor_list = [None] * n
+        valor_series = pl.Series("valor", [None] * n, dtype=pl.Float64)
 
     # Parse data_receita as Date.
     data_series: pl.Series
@@ -110,37 +113,29 @@ def parse_doacoes(raw_path: Path) -> pl.DataFrame:
     else:
         data_series = pl.Series("data_receita", [None] * n, dtype=pl.Date)
 
-    # Extract ano_eleicao as Int64.
-    ano_list: list[int | None] = []
+    # Extract ano_eleicao as Int64 (vectorized: strip → cast).
     if "ANO_ELEICAO" in raw.columns:
-        for v in raw["ANO_ELEICAO"].to_list():
-            if v is None:
-                ano_list.append(None)
-            else:
-                try:
-                    ano_list.append(int(v))
-                except ValueError:
-                    ano_list.append(None)
+        ano_series = raw["ANO_ELEICAO"].str.strip_chars().cast(pl.Int64, strict=False)
     else:
-        ano_list = [None] * n
+        ano_series = pl.Series("ano_eleicao", [None] * n, dtype=pl.Int64)
 
     return pl.DataFrame(
         {
             "pk_doacao": list(range(1, n + 1)),
-            "ano_eleicao": pl.Series("ano_eleicao", ano_list, dtype=pl.Int64),
-            "doc_doador": doc_raw_list,
-            "tipo_doador": tipo_doador_list,
-            "cnpj_doador": cnpj_doador_list,
-            "cpf_doador": cpf_doador_list,
-            "nome_doador": _safe_str_list("NOME_DOADOR"),
-            "doc_candidato": _safe_str_list("CPF_CNPJ_CANDIDATO"),
-            "nome_candidato": _safe_str_list("NOME_CANDIDATO"),
-            "partido_candidato": _safe_str_list("PARTIDO_CANDIDATO"),
-            "cargo_candidato": _safe_str_list("CARGO_CANDIDATO"),
-            "uf_candidato": _safe_str_list("UF_CANDIDATO"),
-            "tipo_recurso": _safe_str_list("TIPO_RECURSO"),
-            "valor": pl.Series("valor", valor_list, dtype=pl.Float64),
-            "data_receita": data_series.rename("data_receita"),
+            "ano_eleicao": ano_series,
+            "doc_doador": doc_series,
+            "tipo_doador": _doador_tmp["tipo_doador"],
+            "cnpj_doador": _doador_tmp["cnpj_doador"],
+            "cpf_doador": _doador_tmp["cpf_doador"],
+            "nome_doador": _safe_series("NOME_DOADOR"),
+            "doc_candidato": _safe_series("CPF_CNPJ_CANDIDATO"),
+            "nome_candidato": _safe_series("NOME_CANDIDATO"),
+            "partido_candidato": _safe_series("PARTIDO_CANDIDATO"),
+            "cargo_candidato": _safe_series("CARGO_CANDIDATO"),
+            "uf_candidato": _safe_series("UF_CANDIDATO"),
+            "tipo_recurso": _safe_series("TIPO_RECURSO"),
+            "valor": valor_series,
+            "data_receita": data_series,
             "fk_fornecedor": pl.Series("fk_fornecedor", [None] * n, dtype=pl.Int64),
             "fk_socio": pl.Series("fk_socio", [None] * n, dtype=pl.Int64),
             "fk_candidato": pl.Series("fk_candidato", [None] * n, dtype=pl.Int64),

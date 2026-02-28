@@ -1,17 +1,22 @@
 # pipeline/sources/pncp/download.py
 #
-# IO-only: paginate through the PNCP API and save contracts to a JSON file.
+# IO-only: paginate through the PNCP API and save contracts as per-window
+# Parquet files.
 #
 # Design decisions:
-#   - PNCP consulta API (v1) requires dataInicial and dataFinal parameters.
-#     Max tamanhoPagina is 500.
-#   - Monthly date windows are fetched in parallel (ThreadPoolExecutor) since
-#     each month's pagination is independent. This cuts total time from ~2h
-#     to ~8min for 12 months of data.
-#   - The output is a single merged JSON file.
+#   - Each monthly date window is fetched in a separate thread and written
+#     directly to a Parquet file inside a temporary directory.
+#   - The temp directory is renamed atomically to the final path only after
+#     ALL windows complete successfully. If any window fails, the temp
+#     directory is deleted and the exception re-raised (all-or-nothing).
+#   - This replaces the previous approach of accumulating ALL records in a
+#     single Python list (~10 GB) before serializing to JSON. Peak memory
+#     is now bounded to one window's data (~200 MB) instead of all windows.
+#   - Per-window Parquet files are named window_{dataInicial}_{dataFinal}.parquet
+#     so each thread writes to a unique file — no locking needed.
 from __future__ import annotations
 
-import json
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from pathlib import Path
@@ -20,6 +25,7 @@ from typing import Any
 import httpx
 
 from pipeline.log import log
+from pipeline.sources.pncp._record import build_window_df
 
 _PAGE_SIZE = 500
 _MAX_WORKERS = 6
@@ -32,24 +38,32 @@ def download_pncp(
     max_pages_per_month: int = 1000,
     days_back: int = 365,
 ) -> Path:
-    """Download contracts from the PNCP consulta API and save as one JSON file.
+    """Download contracts from the PNCP API as per-window Parquet files.
 
-    Fetches contracts in monthly date windows, with months fetched in parallel.
+    Each monthly window is fetched in parallel and written to its own Parquet
+    file. On success, the temp directory is renamed to the final path. On
+    any error, the temp directory is deleted.
 
     Args:
         base_url:            PNCP API base URL.
-        raw_dir:             Directory where the merged JSON will be saved.
+        raw_dir:             Parent directory for output.
         timeout:             HTTP timeout per request in seconds.
         max_pages_per_month: Safety cap on pages per monthly window.
         days_back:           How many days of history to fetch.
 
     Returns:
-        Absolute path to the saved merged JSON file.
+        Path to the directory containing per-window Parquet files.
     """
     raw_dir.mkdir(parents=True, exist_ok=True)
-    output_path = raw_dir / "pncp_contratos.json"
+    windows_tmp = raw_dir / "pncp_windows_tmp"
+    windows_final = raw_dir / "pncp_windows"
 
-    # Build monthly windows
+    # Clean stale temp dir from a previous crashed run.
+    if windows_tmp.exists():
+        shutil.rmtree(windows_tmp)
+    windows_tmp.mkdir()
+
+    # Build monthly date windows.
     end = date.today()
     start = end - timedelta(days=days_back)
     windows: list[tuple[str, str]] = []
@@ -64,41 +78,56 @@ def download_pncp(
         )
         window_start = window_end + timedelta(days=1)
 
-    # Fetch months in parallel
-    all_records: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
-        futures = {
-            pool.submit(
-                _fetch_window,
-                base_url,
-                di,
-                df,
-                timeout,
-                max_pages_per_month,
-            ): (di, df)
-            for di, df in windows
-        }
-        for future in as_completed(futures):
-            di, df = futures[future]
-            records = future.result()
-            all_records.extend(records)
-            log(f"  PNCP {di}-{df}: {len(records)} contratos")
+    try:
+        total = 0
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+            futures = {
+                pool.submit(
+                    _fetch_and_save_window,
+                    base_url,
+                    di,
+                    df,
+                    timeout,
+                    max_pages_per_month,
+                    windows_tmp,
+                ): (di, df)
+                for di, df in windows
+            }
+            for future in as_completed(futures):
+                di, df_date = futures[future]
+                count = future.result()  # raises on error → except block
+                total += count
+                log(f"  PNCP {di}-{df_date}: {count} contratos")
+    except Exception:
+        shutil.rmtree(windows_tmp, ignore_errors=True)
+        raise
 
-    merged = {"data": all_records, "totalRegistros": len(all_records)}
-    output_path.write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")
-    log(f"  PNCP total: {len(all_records)} contratos")
+    # Atomic swap: remove previous final dir, rename tmp → final.
+    # shutil.rmtree is needed because Path.rename on Windows fails if
+    # the destination already exists.
+    if windows_final.exists():
+        shutil.rmtree(windows_final)
+    windows_tmp.rename(windows_final)
+    log(f"  PNCP total: {total} contratos")
+    return windows_final
 
-    return output_path
 
-
-def _fetch_window(
+def _fetch_and_save_window(
     base_url: str,
     data_inicial: str,
     data_final: str,
     timeout: int,
     max_pages: int,
-) -> list[dict[str, Any]]:
-    """Fetch all pages for a single date window."""
+    windows_dir: Path,
+) -> int:
+    """Fetch all pages for a date window, extract, and write as Parquet.
+
+    Each thread writes to a unique filename (window_{di}_{df}.parquet),
+    so no locking is needed.
+
+    Returns:
+        Number of records fetched for this window.
+    """
     records: list[dict[str, Any]] = []
     page = 1
 
@@ -132,4 +161,12 @@ def _fetch_window(
             break
         page += 1
 
-    return records
+    # Write this window's records as a single Parquet file.
+    # records contains only ONE window (~500K records max, ~200 MB).
+    # The list is GC'd when the function returns.
+    if records:
+        df = build_window_df(records)
+        parquet_path = windows_dir / f"window_{data_inicial}_{data_final}.parquet"
+        df.write_parquet(parquet_path)
+
+    return len(records)
