@@ -7,7 +7,7 @@
 | **Fase 1** | CONCLUÍDA | 54 domínio + 8 integração = 62 | Primeiro vertical slice E2E: `GET /api/fornecedores/{cnpj}` |
 | **Fase 2a** | CONCLUÍDA | +31 integração = 93 total | Todos endpoints REST + rate limiting |
 | **Fase 2b** | CONCLUÍDA | +20 domínio = 113 total | Alertas e indicadores restantes + bounded contexts doação/servidor |
-| **Fase 3** | FUTURA | — | Frontend: tipos, services, hooks, páginas |
+| **Fase 3** | CONCLUÍDA | 23 frontend + 27 todo = 50 | Frontend completo: types, services, hooks, 8 páginas, router |
 | **Fase 4** | FUTURA | — | Pipeline de dados |
 
 ---
@@ -41,13 +41,24 @@
 
 ### Frontend (web/)
 - **Tooling**: Vite + React 18 + TypeScript strict + Tailwind + Vitest configurados
-- **Código**: apenas `main.tsx` com placeholder "Em desenvolvimento"
-- **101 arquivos .ts/.tsx vazios** aguardando implementação
+- **Types**: 10 arquivos espelhando DTOs do backend (fornecedor, alerta, score, contrato, grafo, doacao, sancao, orgao, stats, api)
+- **Services**: api.ts (fetch wrapper) + 6 services tipados (fornecedor, alerta, contrato, orgao, busca, stats)
+- **Hooks**: useApi (discriminated union state), usePagination, useDebounce
+- **Lib**: formatters (CNPJ, currency, date), colors (faixa→cor, severidade→cor), constants (labels, pesos)
+- **Layout**: Header (nav + busca rápida), Footer (disclaimer), PageContainer
+- **UI primitivos**: Button, Badge, Card, Table<T>, Pagination, Loading, ErrorState, EmptyState
+- **Componentes domínio**: ScoreBadge, AlertaCriticoBadge, SeveridadeBadge, CNPJFormatado, ValorMonetario, FreshnessBanner
+- **8 páginas completas**: Home, FichaFornecedor (16 sub-componentes), Ranking, Busca, Alertas, GrafoSocietario, DashboardOrgao, Metodologia
+- **Router**: createBrowserRouter com 8 rotas aninhadas no layout App
+- **105 de 109 arquivos implementados** (4 restantes: charts Nivo + Sidebar — dependem de libs externas)
 
 ### Testes
-- **54 domínio** (puros, sem IO, <0.1s)
+- **74 domínio** (puros, sem IO, <0.1s)
 - **39 integração** (API + DuckDB in-memory)
-- **93 total**, lint limpo
+- **113 backend total**, lint limpo
+- **23 frontend** (FichaFornecedor) + 27 todo stubs
+- **tsc --noEmit**: 0 erros (strict mode)
+- **vite build**: 267 kB JS + 21 kB CSS
 
 ---
 
@@ -300,40 +311,41 @@ ruff check api/ tests/
 
 ---
 
-# Fase 3 — Frontend (futuro)
+# Fase 3 — Frontend (CONCLUÍDA)
 
-## Contexto
+## O que foi implementado
 
-101 arquivos .ts/.tsx vazios. Backend completo com 9 endpoints testados.
+### 3a. Foundation — 19 arquivos
+- **types/**: 10 arquivos espelhando DTOs (api, fornecedor, alerta, score, contrato, grafo, doacao, sancao, orgao, stats)
+- **services/**: api.ts (apiFetch + apiFetchBlob, baseURL /api, ApiError) + 6 services tipados
+- **hooks/**: useApi (discriminated union: idle|loading|success|error + refetch), usePagination, useDebounce
+- **lib/**: formatters (CNPJ, currency, date, number), colors (FAIXA_COLORS, SEVERIDADE_COLORS), constants (labels, pesos)
 
-## Prioridade de implementação sugerida:
+### 3b. Layout + UI primitivos — 17 arquivos
+- **Layout**: Header (nav + busca rápida), Footer (disclaimer + links), PageContainer (max-w-7xl)
+- **UI**: Button (3 variants), Badge, Card+CardHeader, Table<T> (genérica), Pagination, Loading+LoadingSkeleton, ErrorState, EmptyState
+- **Domínio**: ScoreBadge, AlertaCriticoBadge, SeveridadeBadge, CNPJFormatado (com link), ValorMonetario, FreshnessBanner
 
-### 3a. Foundation (types + services + hooks compartilhados)
-1. `web/src/types/` — espelhar DTOs do backend (fornecedor, alerta, score, contrato, grafo, stats, api)
-2. `web/src/services/api.ts` — fetch config com baseURL, error handling
-3. `web/src/services/` — um service por recurso da API
-4. `web/src/hooks/useApi.ts` — hook genérico tipado (loading | error | data)
-5. `web/src/lib/formatters.ts` — formatCNPJ, formatCurrency, formatDate
-6. `web/src/lib/colors.ts` — mapa faixa→cor, severidade→cor
+### 3c. Páginas — 67 arquivos (8 páginas, cada vertical slice completa)
+- **Home**: AlertaFeed + AlertaFeedItem + ResumoGeral + hooks (useAlertasFeed, useStats)
+- **FichaFornecedor** (16 arquivos): SecaoDadosCadastrais, SecaoAlertas (agrupamento por tipo), AlertaGrupo (details/summary), SecaoScore, SecaoContratos, SecaoSocios, SecaoSancoes, SecaoDoacoes, GrafoMini, ExportButtons, DisclaimerBanner, NotaOficial + hooks (useFicha, useExport) + types.ts — **23 testes passando**
+- **Ranking**: RankingTabela + RankingFiltros (faixa, client-side) + useRanking
+- **Busca**: BuscaInput (debounce 300ms) + ResultadoLista + useBusca (idle quando query < 2 chars, URL sync)
+- **Alertas**: AlertaLista + AlertaFiltros (tipo server-side, severidade client-side) + useAlertas
+- **GrafoSocietario**: GrafoCanvas (placeholder SVG), GrafoControles, GrafoLegenda, NoTooltip + hooks (useGrafo, useGrafoExpansion) + types.ts
+- **DashboardOrgao**: OrgaoResumo + TopFornecedores (Table) + ContratosChart (placeholder) + useDashboardOrgao
+- **Metodologia** (estática): ExplicacaoIndicadores, ExplicacaoAlertas, FontesDados, Limitacoes, Changelog
 
-### 3b. Layout + UI primitivos
-1. `web/src/components/layout/` — Header, Footer, PageContainer
-2. `web/src/components/ui/` — Button, Badge, Card, Table, Pagination, Loading, ErrorState, EmptyState
-3. `web/src/components/` — ScoreBadge, AlertaCriticoBadge, CNPJFormatado, ValorMonetario
+### 3d. Router + App shell — 3 arquivos
+- **router.tsx**: createBrowserRouter com 8 rotas aninhadas
+- **App.tsx**: Header + Outlet + Footer, flex min-h-screen
+- **main.tsx**: RouterProvider + index.css (Tailwind directives)
 
-### 3c. Páginas (vertical slices)
-1. **Home** — AlertaFeed + ResumoGeral (primeira página visível)
-2. **FichaFornecedor** — página mais complexa (todas as seções)
-3. **Ranking** — tabela com filtros
-4. **Busca** — input com debounce + resultados
-5. **Alertas** — feed filtrado
-6. **GrafoSocietario** — visualização force-directed (lib externa)
-7. **DashboardOrgao** — dashboard por órgão
-8. **Metodologia** — página estática de transparência
-
-### 3d. Router + App shell
-- `web/src/router.tsx` — React Router com todas as rotas
-- `web/src/App.tsx` — layout root com Header/Footer
+### Pendências menores (4 arquivos vazios)
+- `components/charts/ScoreGauge.tsx` — requer lib de charts (Nivo)
+- `components/charts/ContratosTimeline.tsx` — requer lib de charts (Nivo)
+- `components/charts/TreemapContratos.tsx` — requer lib de charts (Nivo)
+- `components/layout/Sidebar.tsx` — não necessário no design atual
 
 ---
 

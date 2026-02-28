@@ -1,11 +1,11 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { RouterProvider } from "react-router-dom";
+import { router } from "./router";
+import "./index.css";
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <div className="p-8">
-      <h1 className="text-2xl font-bold">Testa de Ferro</h1>
-      <p className="text-gray-600 mt-2">Em desenvolvimento.</p>
-    </div>
+    <RouterProvider router={router} />
   </React.StrictMode>,
-)
+);
