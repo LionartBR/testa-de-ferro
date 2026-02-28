@@ -21,6 +21,21 @@ repos:
       - id: detect-secrets
         args: [--baseline, .secrets.baseline]
 
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (frontend)
+        entry: bash -c 'cd web && npx eslint src/'
+        language: system
+        pass_filenames: false
+        types_or: [ts, tsx]
+      - id: tsc
+        name: tsc --noEmit (frontend)
+        entry: bash -c 'cd web && npx tsc --noEmit'
+        language: system
+        pass_filenames: false
+        types_or: [ts, tsx]
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

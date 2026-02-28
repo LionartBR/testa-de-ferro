@@ -4,7 +4,7 @@
 
 **Nunca** abra uma issue pública para reportar vulnerabilidades de segurança.
 
-Use o [GitHub Security Advisories](https://github.com/OWNER/testa-de-ferro/security/advisories/new) para reportar de forma privada.
+Use o [GitHub Security Advisories](https://github.com/LionartBR/testa-de-ferro/security/advisories/new) para reportar de forma privada.
 
 ### O que reportar
 

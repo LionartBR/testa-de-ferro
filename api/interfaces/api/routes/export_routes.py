@@ -39,5 +39,15 @@ def export_ficha(
             media_type="text/csv",
             headers={"Content-Disposition": f"attachment; filename={cnpj.valor}.csv"},
         )
-    # pdf — placeholder
-    raise HTTPException(status_code=501, detail="Export PDF ainda nao implementado")
+    # pdf
+    try:
+        from api.infrastructure.pdf_generator import gerar_pdf_ficha
+
+        pdf_bytes = gerar_pdf_ficha(ficha)
+    except RuntimeError as err:
+        raise HTTPException(status_code=501, detail=str(err)) from err
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={cnpj.valor}.pdf"},
+    )

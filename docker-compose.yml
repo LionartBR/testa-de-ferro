@@ -11,6 +11,12 @@ services:
       - .env
     environment:
       - DUCKDB_PATH=/data/testa_de_ferro.duckdb
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/stats"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   web:
@@ -20,5 +26,17 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.pipeline
+    volumes:
+      - ./pipeline/data:/app/pipeline/data
+    env_file:
+      - .env
+    profiles:
+      - pipeline
