@@ -37,8 +37,7 @@ def _scrape_latest_month(page_url: str, timeout: int) -> str:
     matches = _ARQUIVOS_RE.findall(resp.text)
     if not matches:
         raise RuntimeError(
-            f"Could not find {_ORIGEM} entries on {page_url}. "
-            "The Portal da Transparência page format may have changed."
+            f"Could not find {_ORIGEM} entries on {page_url}. The Portal da Transparência page format may have changed."
         )
     latest = max(matches)
     return f"{latest[0]}{latest[1]}"

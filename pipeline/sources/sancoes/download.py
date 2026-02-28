@@ -30,9 +30,7 @@ from pipeline.log import log
 # (CEIS, CNEP, CEPIM) may have a different latest date. We scrape the
 # available date from the HTML page's embedded JS `arquivos` array.
 
-_ARQUIVOS_RE = re.compile(
-    r'"ano"\s*:\s*"(\d{4})"\s*,\s*"mes"\s*:\s*"(\d{2})"\s*,\s*"dia"\s*:\s*"(\d{2})"'
-)
+_ARQUIVOS_RE = re.compile(r'"ano"\s*:\s*"(\d{4})"\s*,\s*"mes"\s*:\s*"(\d{2})"\s*,\s*"dia"\s*:\s*"(\d{2})"')
 
 
 def _scrape_latest_date(page_url: str, timeout: int) -> str:
@@ -47,8 +45,7 @@ def _scrape_latest_date(page_url: str, timeout: int) -> str:
     matches = _ARQUIVOS_RE.findall(resp.text)
     if not matches:
         raise RuntimeError(
-            f"Could not find available dates on {page_url}. "
-            "The Portal da Transparência page format may have changed."
+            f"Could not find available dates on {page_url}. The Portal da Transparência page format may have changed."
         )
     latest = max(matches)
     return f"{latest[0]}{latest[1]}{latest[2]}"
