@@ -166,7 +166,7 @@ def _run_sources(config: PipelineConfig) -> None:
     from pipeline.sources.servidores.download import download_servidores
     from pipeline.sources.servidores.parse import parse_servidores
     from pipeline.sources.servidores.validate import validate_servidores
-    from pipeline.sources.tse.download import download_tse
+    from pipeline.sources.tse.download import download_doacoes
     from pipeline.sources.tse.parse import parse_doacoes
     from pipeline.sources.tse.validate import validate_doacoes
 
@@ -213,7 +213,7 @@ def _run_sources(config: PipelineConfig) -> None:
 
     # ---- TSE (Doações) ----
     _log("Source: TSE doações...")
-    tse_raw = download_tse(urls.tse_doacoes, raw_dir, config.download_timeout)
+    tse_raw = download_doacoes(urls.tse_doacoes, raw_dir, config.download_timeout)
     doacoes_df = validate_doacoes(parse_doacoes(tse_raw))
     write_parquet(doacoes_df, staging_dir / "doacoes.parquet")
 
