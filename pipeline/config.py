@@ -39,7 +39,7 @@ class SourceUrls:
     cnpj_empresas: str = "https://arquivos.receitafederal.gov.br/public.php/webdav/2026-02/Empresas0.zip"
     cnpj_qsa: str = "https://arquivos.receitafederal.gov.br/public.php/webdav/2026-02/Socios0.zip"
     pncp_contratos: str = "https://pncp.gov.br/api/consulta/v1/contratos"
-    comprasnet_base: str = "https://dadosabertos.compras.gov.br/modulo-download"
+    comprasnet_base: str = "http://repositorio.dados.gov.br/seges/comprasnet_contratos/anual/comprasnet-contratos-anual-contratos-latest.csv"
     tse_doacoes: str = (
         "https://cdn.tse.jus.br/estatistica/sead/odsele/prestacao_contas"
         "/prestacao_de_contas_eleitorais_candidatos_2022.zip"
@@ -48,7 +48,7 @@ class SourceUrls:
     cnep: str = "https://portaldatransparencia.gov.br/download-de-dados/cnep"
     cepim: str = "https://portaldatransparencia.gov.br/download-de-dados/cepim"
     servidores: str = "https://portaldatransparencia.gov.br/download-de-dados/servidores"
-    rais: str = "https://bi.mte.gov.br/bgcaged/caged_rais/RAIS2024.zip"
+    rais: str = "ftp://ftp.mtps.gov.br/pdet/microdados/RAIS/"
     juntas_comerciais: str = "https://arquivos.receitafederal.gov.br/public.php/webdav/2026-02/Estabelecimentos0.zip"
 
 
