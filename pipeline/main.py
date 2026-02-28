@@ -147,7 +147,8 @@ def _run_sources(config: PipelineConfig) -> None:
     Parse + validate run sequentially after all downloads complete.
     Errors in any source abort the pipeline.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from collections.abc import Callable
+    from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
     from pipeline.sources.cnpj.download import download_cnpj
     from pipeline.sources.cnpj.parse_empresas import parse_empresas
@@ -176,7 +177,8 @@ def _run_sources(config: PipelineConfig) -> None:
 
     # ---- Phase 1: Parallel downloads ----
     _log("Downloading all sources in parallel...")
-    download_tasks = {
+    DownloadFn = Callable[[str, Path, int], Path]
+    download_tasks: dict[str, tuple[DownloadFn, str, Path, int]] = {
         "cnpj_empresas": (download_cnpj, urls.cnpj_empresas, raw_dir / "cnpj", t),
         "cnpj_qsa": (download_cnpj, urls.cnpj_qsa, raw_dir / "cnpj_qsa", t),
         "pncp": (download_pncp, urls.pncp_contratos, raw_dir / "pncp", t),
@@ -189,7 +191,7 @@ def _run_sources(config: PipelineConfig) -> None:
 
     raw_paths: dict[str, Path] = {}
     with ThreadPoolExecutor(max_workers=6) as pool:
-        future_to_name = {
+        future_to_name: dict[Future[Path], str] = {
             pool.submit(fn, url, dest, timeout): name for name, (fn, url, dest, timeout) in download_tasks.items()
         }
         for future in as_completed(future_to_name):

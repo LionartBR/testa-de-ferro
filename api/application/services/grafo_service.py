@@ -19,8 +19,8 @@ class GrafoService:
                     id=str(n["id"]),
                     tipo=str(n["tipo"]),
                     label=str(n["label"]),
-                    score=int(n["score"]) if n.get("score") is not None else None,
-                    qtd_alertas=int(n["qtd_alertas"]) if n.get("qtd_alertas") is not None else None,
+                    score=int(n["score"]) if n.get("score") is not None else None,  # type: ignore[call-overload]
+                    qtd_alertas=int(n["qtd_alertas"]) if n.get("qtd_alertas") is not None else None,  # type: ignore[call-overload]
                 )
                 for n in nos_raw
             ],
