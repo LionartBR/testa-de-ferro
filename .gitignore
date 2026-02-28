@@ -32,6 +32,9 @@ web/dist/
 web/.vite/
 *.tsbuildinfo
 
+# Claude Code workspace
+.claude/
+
 # IDEs
 .vscode/
 .idea/
