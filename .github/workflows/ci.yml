@@ -30,7 +30,10 @@ jobs:
         run: mypy --strict api/ pipeline/
 
       - name: Tests
-        run: pytest tests/ --cov=api --cov=pipeline --tb=short
+        run: pytest tests/ --cov=api --cov=pipeline --tb=short --cov-fail-under=80
+
+      - name: Detect secrets
+        run: detect-secrets scan --baseline .secrets.baseline
 
       - name: Audit dependencies
         run: pip-audit

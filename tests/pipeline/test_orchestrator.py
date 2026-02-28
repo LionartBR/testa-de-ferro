@@ -155,6 +155,16 @@ def _create_staging(staging_dir: Path) -> None:
     )
     candidatos.write_parquet(staging_dir / "candidatos.parquet")
 
+    # rais.parquet — employee counts (required by completude)
+    rais = pl.DataFrame(
+        {
+            "cnpj_basico": ["11222333", "33000167"],
+            "qtd_funcionarios": [0, 50],
+            "porte_empresa": pl.Series(["MICRO", "GRANDE"], dtype=pl.Utf8),
+        }
+    )
+    rais.write_parquet(staging_dir / "rais.parquet")
+
     # doacoes.parquet — 1 doacao
     doacoes = pl.DataFrame(
         {

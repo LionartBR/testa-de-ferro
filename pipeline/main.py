@@ -68,6 +68,27 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
     servidores_df = read_parquet(staging_dir / "servidores.parquet")
     doacoes_df = read_parquet(staging_dir / "doacoes.parquet")
 
+    # Merge RAIS employee counts into empresas (adds qtd_funcionarios column).
+    rais_path = staging_dir / "rais.parquet"
+    if rais_path.exists():
+        rais_df = read_parquet(rais_path)
+        empresas_df = _merge_rais_into_empresas(empresas_df, rais_df)
+        log(f"  Merged RAIS: qtd_funcionarios column added to {len(empresas_df):,} fornecedores")
+
+    # Merge juntas_comerciais QSA diffs into the base QSA (concat + dedup).
+    juntas_path = staging_dir / "juntas_comerciais.parquet"
+    if juntas_path.exists():
+        juntas_df = read_parquet(juntas_path)
+        qsa_df = _merge_qsa_diffs(qsa_df, juntas_df)
+        log(f"  Merged QSA diffs: {len(qsa_df):,} total socio rows after merge")
+
+    # Merge Comprasnet contracts into the PNCP contratos (concat + dedup).
+    comprasnet_path = staging_dir / "comprasnet.parquet"
+    if comprasnet_path.exists():
+        comprasnet_df = read_parquet(comprasnet_path)
+        contratos_df = _merge_contratos(contratos_df, comprasnet_df)
+        log(f"  Merged Comprasnet: {len(contratos_df):,} total contract rows after merge")
+
     # ---- Transforms ----
     log("Running transforms...")
 
@@ -121,6 +142,71 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
     output_path = build_duckdb(staging_dir, config.duckdb_output_path)
     log(f"Done. DuckDB written to: {output_path}")
     return output_path
+
+
+def _merge_rais_into_empresas(empresas_df: pl.DataFrame, rais_df: pl.DataFrame) -> pl.DataFrame:
+    """Join RAIS employee counts into the empresas DataFrame.
+
+    Matches on cnpj_basico (first 8 digits). Fornecedores not found in RAIS
+    receive null (not zero — null means "data not available").
+    """
+    if rais_df.is_empty() or "cnpj_basico" not in empresas_df.columns:
+        return empresas_df.with_columns(pl.lit(None, dtype=pl.Int64).alias("qtd_funcionarios"))
+
+    empresas_with_basico = empresas_df.with_columns(pl.col("cnpj_basico").str.zfill(8).alias("_cnpj_basico"))
+    rais_slim = rais_df.select(
+        [
+            pl.col("cnpj_basico").str.zfill(8).alias("_cnpj_basico"),
+            pl.col("qtd_funcionarios"),
+        ]
+    )
+    joined = empresas_with_basico.join(rais_slim, on="_cnpj_basico", how="left").drop("_cnpj_basico")
+    return joined
+
+
+def _merge_qsa_diffs(qsa_df: pl.DataFrame, juntas_df: pl.DataFrame) -> pl.DataFrame:
+    """Merge Juntas Comerciais QSA diffs into the base Receita Federal QSA.
+
+    Concat and dedup so each (cnpj_basico, nome_socio, data_entrada) triple
+    appears at most once.
+    """
+    if juntas_df.is_empty():
+        return qsa_df
+
+    if "data_saida" not in qsa_df.columns:
+        qsa_df = qsa_df.with_columns(pl.lit(None, dtype=pl.Date).alias("data_saida"))
+
+    shared_cols = [col for col in qsa_df.columns if col in juntas_df.columns]
+    juntas_aligned = juntas_df.select(shared_cols)
+
+    merged = pl.concat([qsa_df, juntas_aligned], how="diagonal")
+
+    dedup_cols = [c for c in ["cnpj_basico", "nome_socio", "data_entrada"] if c in merged.columns]
+    if dedup_cols:
+        merged = merged.unique(subset=dedup_cols, keep="first", maintain_order=True)
+
+    return merged
+
+
+def _merge_contratos(contratos_df: pl.DataFrame, comprasnet_df: pl.DataFrame) -> pl.DataFrame:
+    """Merge Comprasnet contracts into the PNCP contracts DataFrame.
+
+    Concat and dedup on (cnpj_fornecedor, num_licitacao, data_assinatura).
+    """
+    if comprasnet_df.is_empty():
+        return contratos_df
+
+    merged = pl.concat([contratos_df, comprasnet_df], how="diagonal")
+
+    dedup_cols = [c for c in ["cnpj_fornecedor", "num_licitacao", "data_assinatura"] if c in merged.columns]
+    if dedup_cols:
+        merged = merged.unique(subset=dedup_cols, keep="first", maintain_order=True)
+
+    if "pk_contrato" in merged.columns:
+        n = len(merged)
+        merged = merged.with_columns(pl.Series("pk_contrato", list(range(1, n + 1))))
+
+    return merged
 
 
 def _prepare_socios_staging(socios_df: pl.DataFrame) -> pl.DataFrame:
@@ -278,9 +364,18 @@ def _run_sources(config: PipelineConfig) -> None:
     from pipeline.sources.cnpj.parse_empresas import parse_empresas
     from pipeline.sources.cnpj.parse_qsa import parse_qsa
     from pipeline.sources.cnpj.validate import validate_empresas, validate_qsa
+    from pipeline.sources.comprasnet.download import download_comprasnet
+    from pipeline.sources.comprasnet.parse import parse_comprasnet
+    from pipeline.sources.comprasnet.validate import validate_comprasnet
+    from pipeline.sources.juntas_comerciais.download import download_juntas_comerciais
+    from pipeline.sources.juntas_comerciais.parse import parse_qsa_diffs
+    from pipeline.sources.juntas_comerciais.validate import validate_qsa_diffs
     from pipeline.sources.pncp.download import download_pncp
     from pipeline.sources.pncp.parse import parse_contratos
     from pipeline.sources.pncp.validate import validate_contratos
+    from pipeline.sources.rais.download import download_rais
+    from pipeline.sources.rais.parse import parse_rais
+    from pipeline.sources.rais.validate import validate_rais
     from pipeline.sources.sancoes.download import download_ceis, download_cepim, download_cnep
     from pipeline.sources.sancoes.parse_ceis import parse_ceis
     from pipeline.sources.sancoes.parse_cepim import parse_cepim
@@ -310,6 +405,9 @@ def _run_sources(config: PipelineConfig) -> None:
         "cepim": (download_cepim, urls.cepim, raw_dir / "cepim", t),
         "servidores": (download_servidores, urls.servidores, raw_dir / "servidores", t),
         "tse": (download_doacoes, urls.tse_doacoes, raw_dir / "tse", t),
+        "rais": (download_rais, urls.rais, raw_dir / "rais", t),
+        "juntas_comerciais": (download_juntas_comerciais, urls.juntas_comerciais, raw_dir / "juntas_comerciais", t),
+        "comprasnet": (download_comprasnet, urls.comprasnet_base, raw_dir / "comprasnet", t),
     }
 
     raw_paths: dict[str, Path] = {}
@@ -355,6 +453,18 @@ def _run_sources(config: PipelineConfig) -> None:
     doacoes_df = validate_doacoes(parse_doacoes(raw_paths["tse"]))
     write_parquet(doacoes_df, staging_dir / "doacoes.parquet")
     log(f"  Parsed doacoes: {len(doacoes_df):,} rows")
+
+    rais_df = validate_rais(parse_rais(raw_paths["rais"]))
+    write_parquet(rais_df, staging_dir / "rais.parquet")
+    log(f"  Parsed rais: {len(rais_df):,} rows")
+
+    juntas_df = validate_qsa_diffs(parse_qsa_diffs(raw_paths["juntas_comerciais"]))
+    write_parquet(juntas_df, staging_dir / "juntas_comerciais.parquet")
+    log(f"  Parsed juntas_comerciais: {len(juntas_df):,} rows")
+
+    comprasnet_df = validate_comprasnet(parse_comprasnet(raw_paths["comprasnet"]))
+    write_parquet(comprasnet_df, staging_dir / "comprasnet.parquet")
+    log(f"  Parsed comprasnet: {len(comprasnet_df):,} rows")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,8 @@ def _fornecedor(
     capital: Decimal | None = None,
     data_abertura: date | None = None,
     cnae: str | None = None,
+    qtd_fornecedores_mesmo_endereco: int = 0,
+    qtd_funcionarios: int | None = None,
 ) -> Fornecedor:
     return Fornecedor(
         cnpj=CNPJ("11222333000181"),
@@ -25,15 +27,23 @@ def _fornecedor(
         capital_social=CapitalSocial(capital) if capital is not None else None,
         data_abertura=data_abertura,
         cnae_principal=cnae,
+        qtd_fornecedores_mesmo_endereco=qtd_fornecedores_mesmo_endereco,
+        qtd_funcionarios=qtd_funcionarios,
     )
 
 
-def _contrato(valor: Decimal = Decimal("500000"), orgao: str = "00001") -> Contrato:
+def _contrato(
+    valor: Decimal = Decimal("500000"),
+    orgao: str = "00001",
+    objeto: str | None = None,
+    data_assinatura: date = date(2025, 6, 1),
+) -> Contrato:
     return Contrato(
         fornecedor_cnpj=CNPJ("11222333000181"),
         orgao_codigo=orgao,
         valor=ValorContrato(valor),
-        data_assinatura=date(2025, 6, 1),
+        data_assinatura=data_assinatura,
+        objeto=objeto,
     )
 
 
@@ -295,7 +305,7 @@ def test_faixa_risco_moderado():
     assert score.faixa == FaixaRisco.MODERADO
 
 
-def test_score_com_todos_novos_indicadores():
+def test_score_com_5_indicadores_originais():
     """capital_baixo(15) + empresa_recente(10) + sancao(5) + multiplas(20) + exclusivo(10) = 60 -> Alto."""
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(
@@ -313,3 +323,219 @@ def test_score_com_todos_novos_indicadores():
     )
     assert score.valor == 60
     assert score.faixa == FaixaRisco.ALTO
+
+
+# ---------- CNAE_INCOMPATIVEL (peso 10) ----------
+
+
+def test_cnae_incompativel_tecnologia_com_obra_ativa():
+    """Empresa de TI (CNAE 6201-5) com contrato de construcao -> ativa indicador."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(cnae="6201-5"),
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato(objeto="Reforma e construcao de edificacao")],
+        referencia=date(2026, 2, 27),
+    )
+    ind = [i for i in score.indicadores if i.tipo == TipoIndicador.CNAE_INCOMPATIVEL]
+    assert len(ind) == 1
+    assert ind[0].peso == 10
+
+
+def test_cnae_compativel_nao_ativa():
+    """Empresa de TI com contrato de software -> nao ativa."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(cnae="6201-5"),
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato(objeto="Desenvolvimento de software para gestao")],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.CNAE_INCOMPATIVEL for i in score.indicadores)
+
+
+def test_cnae_desconhecido_nao_ativa():
+    """CNAE nao mapeado -> nao gera falso positivo."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(cnae="9999-9"),
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato(objeto="Reforma e construcao de edificacao")],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.CNAE_INCOMPATIVEL for i in score.indicadores)
+
+
+def test_cnae_sem_objeto_no_contrato_nao_ativa():
+    """Contrato sem objeto descrito -> nao ativa (fail-safe)."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(cnae="6201-5"),
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato()],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.CNAE_INCOMPATIVEL for i in score.indicadores)
+
+
+# ---------- MESMO_ENDERECO (peso 15) ----------
+
+
+def test_mesmo_endereco_com_2_ou_mais_ativa():
+    """Fornecedor compartilha endereco com 2+ outros -> ativa indicador peso 15."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(qtd_fornecedores_mesmo_endereco=3),
+        socios=[],
+        sancoes=[],
+        contratos=[],
+        referencia=date(2026, 2, 27),
+    )
+    ind = [i for i in score.indicadores if i.tipo == TipoIndicador.MESMO_ENDERECO]
+    assert len(ind) == 1
+    assert ind[0].peso == 15
+
+
+def test_mesmo_endereco_com_1_nao_ativa():
+    """Apenas 1 outro no mesmo endereco -> nao ativa."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(qtd_fornecedores_mesmo_endereco=1),
+        socios=[],
+        sancoes=[],
+        contratos=[],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.MESMO_ENDERECO for i in score.indicadores)
+
+
+def test_mesmo_endereco_zero_nao_ativa():
+    """Nenhum outro no mesmo endereco -> nao ativa."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(qtd_fornecedores_mesmo_endereco=0),
+        socios=[],
+        sancoes=[],
+        contratos=[],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.MESMO_ENDERECO for i in score.indicadores)
+
+
+# ---------- SEM_FUNCIONARIOS (peso 10) ----------
+
+
+def test_sem_funcionarios_com_contratos_ativa():
+    """0 funcionarios + contratos ativos -> ativa indicador peso 10."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(qtd_funcionarios=0),
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato()],
+        referencia=date(2026, 2, 27),
+    )
+    ind = [i for i in score.indicadores if i.tipo == TipoIndicador.SEM_FUNCIONARIOS]
+    assert len(ind) == 1
+    assert ind[0].peso == 10
+
+
+def test_sem_funcionarios_com_funcionarios_nao_ativa():
+    """Empresa com funcionarios -> nao ativa."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(qtd_funcionarios=5),
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato()],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.SEM_FUNCIONARIOS for i in score.indicadores)
+
+
+def test_sem_funcionarios_rais_indisponivel_nao_ativa():
+    """qtd_funcionarios=None (RAIS indisponivel) -> fail-safe, nao ativa."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(qtd_funcionarios=None),
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato()],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.SEM_FUNCIONARIOS for i in score.indicadores)
+
+
+def test_sem_funcionarios_sem_contratos_nao_ativa():
+    """0 funcionarios mas sem contratos -> nao ativa (sem referencia)."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(qtd_funcionarios=0),
+        socios=[],
+        sancoes=[],
+        contratos=[],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.SEM_FUNCIONARIOS for i in score.indicadores)
+
+
+# ---------- CRESCIMENTO_SUBITO (peso 10) ----------
+
+
+def test_crescimento_subito_5x_ativa():
+    """Valor salta 5x entre anos consecutivos com > R$200k -> ativa."""
+    contratos = [
+        _contrato(Decimal("50000"), data_assinatura=date(2024, 3, 1)),
+        _contrato(Decimal("300000"), data_assinatura=date(2025, 3, 1)),
+    ]
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(),
+        socios=[],
+        sancoes=[],
+        contratos=contratos,
+        referencia=date(2026, 2, 27),
+    )
+    ind = [i for i in score.indicadores if i.tipo == TipoIndicador.CRESCIMENTO_SUBITO]
+    assert len(ind) == 1
+    assert ind[0].peso == 10
+
+
+def test_crescimento_subito_abaixo_5x_nao_ativa():
+    """Crescimento de 4x -> nao ativa."""
+    contratos = [
+        _contrato(Decimal("50000"), data_assinatura=date(2024, 3, 1)),
+        _contrato(Decimal("199000"), data_assinatura=date(2025, 3, 1)),
+    ]
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(),
+        socios=[],
+        sancoes=[],
+        contratos=contratos,
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.CRESCIMENTO_SUBITO for i in score.indicadores)
+
+
+def test_crescimento_subito_abaixo_200k_nao_ativa():
+    """5x+ mas valor final < R$200k -> nao ativa."""
+    contratos = [
+        _contrato(Decimal("10000"), data_assinatura=date(2024, 3, 1)),
+        _contrato(Decimal("100000"), data_assinatura=date(2025, 3, 1)),
+    ]
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(),
+        socios=[],
+        sancoes=[],
+        contratos=contratos,
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.CRESCIMENTO_SUBITO for i in score.indicadores)
+
+
+def test_crescimento_subito_anos_nao_consecutivos_nao_ativa():
+    """Jump between non-consecutive years (2023→2025) -> nao ativa."""
+    contratos = [
+        _contrato(Decimal("50000"), data_assinatura=date(2023, 3, 1)),
+        _contrato(Decimal("300000"), data_assinatura=date(2025, 3, 1)),
+    ]
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(),
+        socios=[],
+        sancoes=[],
+        contratos=contratos,
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.CRESCIMENTO_SUBITO for i in score.indicadores)

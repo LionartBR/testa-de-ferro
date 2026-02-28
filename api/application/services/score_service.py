@@ -17,6 +17,8 @@ from api.domain.fornecedor.score import PESOS, IndicadorCumulativo, ScoreDeRisco
 from api.domain.sancao.entities import Sancao
 from api.domain.societario.entities import Socio
 
+from .cnae_mapping import cnae_incompativel_com_objeto, get_cnae_category
+
 # Threshold para considerar capital social "baixo" relativo ao valor contratado.
 _CAPITAL_THRESHOLD_GENERICO = Decimal("10000")
 _CONTRATO_MINIMO_PARA_CAPITAL = Decimal("100000")
@@ -26,6 +28,10 @@ _MESES_EMPRESA_RECENTE = 6
 
 # Socio em multiplas fornecedoras: threshold de empresas com governo.
 _MULTIPLAS_FORNECEDORAS_THRESHOLD = 3
+
+# CRESCIMENTO_SUBITO thresholds.
+_CRESCIMENTO_RAZAO_MINIMA = Decimal("5")
+_CRESCIMENTO_VALOR_MINIMO = Decimal("200000")
 
 
 def calcular_score_cumulativo(
@@ -55,6 +61,22 @@ def calcular_score_cumulativo(
         indicadores.append(ind)
 
     ind = _avaliar_fornecedor_exclusivo(contratos)
+    if ind is not None:
+        indicadores.append(ind)
+
+    ind = _avaliar_cnae_incompativel(fornecedor, contratos)
+    if ind is not None:
+        indicadores.append(ind)
+
+    ind = _avaliar_mesmo_endereco(fornecedor)
+    if ind is not None:
+        indicadores.append(ind)
+
+    ind = _avaliar_sem_funcionarios(fornecedor, contratos)
+    if ind is not None:
+        indicadores.append(ind)
+
+    ind = _avaliar_crescimento_subito(contratos, referencia)
     if ind is not None:
         indicadores.append(ind)
 
@@ -170,3 +192,130 @@ def _avaliar_fornecedor_exclusivo(
         descricao=f"Todos os {len(contratos)} contrato(s) sao com o mesmo orgao",
         evidencia=f"orgao_codigo={orgao_unico}, qtd_contratos={len(contratos)}",
     )
+
+
+def _avaliar_cnae_incompativel(
+    fornecedor: Fornecedor,
+    contratos: list[Contrato],
+) -> IndicadorCumulativo | None:
+    """CNAE_INCOMPATIVEL (peso 10): CNAE principal incompativel com objeto contratado."""
+    if fornecedor.cnae_principal is None or not contratos:
+        return None
+
+    categoria_cnae = get_cnae_category(fornecedor.cnae_principal)
+    if categoria_cnae is None:
+        return None
+
+    for contrato in contratos:
+        if contrato.objeto is None:
+            continue
+        # Infer object category from keywords in objeto text
+        obj_cat = _inferir_categoria_objeto(contrato.objeto)
+        if obj_cat is not None and cnae_incompativel_com_objeto(fornecedor.cnae_principal, obj_cat):
+            return IndicadorCumulativo(
+                tipo=TipoIndicador.CNAE_INCOMPATIVEL,
+                peso=PESOS[TipoIndicador.CNAE_INCOMPATIVEL],
+                descricao=f"CNAE {fornecedor.cnae_principal} ({categoria_cnae}) "
+                f"incompativel com objeto contratado ({obj_cat})",
+                evidencia=f"cnae={fornecedor.cnae_principal}, "
+                f"categoria_cnae={categoria_cnae}, objeto_categoria={obj_cat}",
+            )
+    return None
+
+
+def _inferir_categoria_objeto(objeto: str) -> str | None:
+    """Infer contract object category from keywords in the object description.
+
+    Returns an uppercase category string matching INCOMPATIBLE_COMBOS keys,
+    or None if no category can be inferred.
+    """
+    obj_lower = objeto.lower()
+    keyword_map: dict[str, list[str]] = {
+        "TECNOLOGIA": ["software", "sistema", "ti ", "informatica", "computador", "rede", "dados"],
+        "CONSTRUCAO": ["obra", "construcao", "reforma", "pavimentacao", "edificacao", "engenharia civil"],
+        "SAUDE": ["medicamento", "hospitalar", "saude", "medico", "farmac", "laboratorio"],
+        "ALIMENTACAO": ["alimentacao", "refeicao", "merenda", "alimento"],
+        "LIMPEZA": ["limpeza", "conservacao", "higienizacao", "asseio"],
+        "SEGURANCA": ["vigilancia", "seguranca patrimonial", "monitoramento eletronico"],
+        "CONSULTORIA": ["consultoria", "assessoria", "auditoria"],
+        "EDUCACAO": ["ensino", "treinamento", "capacitacao", "curso"],
+    }
+    for category, keywords in keyword_map.items():
+        if any(kw in obj_lower for kw in keywords):
+            return category
+    return None
+
+
+def _avaliar_mesmo_endereco(
+    fornecedor: Fornecedor,
+) -> IndicadorCumulativo | None:
+    """MESMO_ENDERECO (peso 15): fornecedor compartilha endereco com 2+ outros fornecedores."""
+    if fornecedor.qtd_fornecedores_mesmo_endereco < 2:
+        return None
+
+    return IndicadorCumulativo(
+        tipo=TipoIndicador.MESMO_ENDERECO,
+        peso=PESOS[TipoIndicador.MESMO_ENDERECO],
+        descricao=f"Compartilha endereco com {fornecedor.qtd_fornecedores_mesmo_endereco} "
+        f"outro(s) fornecedor(es) do governo",
+        evidencia=f"qtd_mesmo_endereco={fornecedor.qtd_fornecedores_mesmo_endereco}",
+    )
+
+
+def _avaliar_sem_funcionarios(
+    fornecedor: Fornecedor,
+    contratos: list[Contrato],
+) -> IndicadorCumulativo | None:
+    """SEM_FUNCIONARIOS (peso 10): 0 funcionarios com contratos ativos. None = fail-safe."""
+    if fornecedor.qtd_funcionarios is None:
+        return None
+    if fornecedor.qtd_funcionarios > 0:
+        return None
+    if not contratos:
+        return None
+
+    return IndicadorCumulativo(
+        tipo=TipoIndicador.SEM_FUNCIONARIOS,
+        peso=PESOS[TipoIndicador.SEM_FUNCIONARIOS],
+        descricao=f"Empresa sem funcionarios registrados com {len(contratos)} contrato(s) ativo(s)",
+        evidencia=f"qtd_funcionarios=0, qtd_contratos={len(contratos)}",
+    )
+
+
+def _avaliar_crescimento_subito(
+    contratos: list[Contrato],
+    referencia: date,
+) -> IndicadorCumulativo | None:
+    """CRESCIMENTO_SUBITO (peso 10): valor contratado salta 5x+ entre anos consecutivos, > R$200k."""
+    if not contratos:
+        return None
+
+    # Group contract values by year
+    anuais: dict[int, Decimal] = {}
+    for c in contratos:
+        if c.data_assinatura is None:
+            continue
+        ano = c.data_assinatura.year
+        anuais[ano] = anuais.get(ano, Decimal("0")) + c.valor.valor
+
+    # Compare consecutive years
+    anos_sorted = sorted(anuais.keys())
+    for i in range(1, len(anos_sorted)):
+        ano_prev = anos_sorted[i - 1]
+        ano_curr = anos_sorted[i]
+        if ano_curr != ano_prev + 1:
+            continue
+        valor_prev = anuais[ano_prev]
+        valor_curr = anuais[ano_curr]
+        if valor_prev <= 0:
+            continue
+        razao = valor_curr / valor_prev
+        if razao >= _CRESCIMENTO_RAZAO_MINIMA and valor_curr >= _CRESCIMENTO_VALOR_MINIMO:
+            return IndicadorCumulativo(
+                tipo=TipoIndicador.CRESCIMENTO_SUBITO,
+                peso=PESOS[TipoIndicador.CRESCIMENTO_SUBITO],
+                descricao=f"Valor contratado saltou {razao:.1f}x entre {ano_prev} e {ano_curr}",
+                evidencia=f"ano_anterior={ano_prev}, valor_anterior={valor_prev:.2f}, "
+                f"ano_atual={ano_curr}, valor_atual={valor_curr:.2f}, razao={razao:.1f}x",
+            )
+    return None

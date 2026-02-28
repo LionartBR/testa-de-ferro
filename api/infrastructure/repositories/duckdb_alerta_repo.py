@@ -46,6 +46,24 @@ class DuckDBAlertaRepo:
         ).fetchall()
         return [self._to_dict(r) for r in rows]
 
+    def listar_por_fornecedor(self, cnpj: str) -> list[dict[str, object]]:
+        """Pre-computed alerts for a specific fornecedor by CNPJ."""
+        rows = self._conn.execute(
+            """
+            SELECT fac.tipo_alerta, fac.severidade, fac.descricao,
+                   fac.evidencia, fac.detectado_em,
+                   df.cnpj, df.razao_social,
+                   ds.nome AS socio_nome
+            FROM fato_alerta_critico fac
+            JOIN dim_fornecedor df ON fac.fk_fornecedor = df.pk_fornecedor
+            LEFT JOIN dim_socio ds ON fac.fk_socio = ds.pk_socio
+            WHERE df.cnpj = ?
+            ORDER BY fac.detectado_em DESC
+        """,
+            [cnpj],
+        ).fetchall()
+        return [self._to_dict(r) for r in rows]
+
     def contar(self) -> int:
         """SELECT count(*) FROM fato_alerta_critico."""
         row = self._conn.execute(

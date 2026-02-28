@@ -10,3 +10,9 @@ from .entities import Socio
 
 class SocietarioRepository(Protocol):
     def listar_socios_por_fornecedor(self, cnpj: CNPJ) -> list[Socio]: ...
+
+    def grafo_2_niveis(
+        self,
+        cnpj: CNPJ,
+        max_nos: int = 50,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]: ...

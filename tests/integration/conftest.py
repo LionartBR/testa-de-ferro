@@ -28,12 +28,12 @@ def test_db() -> Generator[duckdb.DuckDBPyConnection, None, None]:
          1000.00, '6201-5', 'Desenvolvimento de programas',
          'Rua das Flores, 100', 'Sao Paulo', 'SP', '01001-000',
          'ATIVA', 25, 'Moderado', 2, 'GRAVISSIMO', 3, 750000.00,
-         CURRENT_TIMESTAMP),
+         0, CURRENT_TIMESTAMP),
         (2, '33.000.167/0001-01', 'Empresa Limpa SA', '2010-06-01',
          5000000.00, '4711-3', 'Comercio varejista',
          'Av. Paulista, 1000', 'Sao Paulo', 'SP', '01310-100',
          'ATIVA', 0, 'Baixo', 0, NULL, 5, 2000000.00,
-         CURRENT_TIMESTAMP)
+         50, CURRENT_TIMESTAMP)
     """)
 
     # --- Socios ---

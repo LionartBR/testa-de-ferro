@@ -33,9 +33,10 @@ CREATE TABLE dim_fornecedor (
     faixa_risco     VARCHAR(20) DEFAULT 'Baixo',
     qtd_alertas     SMALLINT DEFAULT 0,
     max_severidade  VARCHAR(20),
-    total_contratos INTEGER DEFAULT 0,
-    valor_total     DECIMAL(18,2) DEFAULT 0,
-    atualizado_em   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    total_contratos  INTEGER DEFAULT 0,
+    valor_total      DECIMAL(18,2) DEFAULT 0,
+    qtd_funcionarios INTEGER,
+    atualizado_em    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE dim_orgao (

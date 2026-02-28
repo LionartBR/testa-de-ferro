@@ -48,6 +48,8 @@ class SourceUrls:
     cnep: str = "https://portaldatransparencia.gov.br/download-de-dados/cnep"
     cepim: str = "https://portaldatransparencia.gov.br/download-de-dados/cepim"
     servidores: str = "https://portaldatransparencia.gov.br/download-de-dados/servidores"
+    rais: str = "https://bi.mte.gov.br/bgcaged/caged_rais/RAIS2024.zip"
+    juntas_comerciais: str = "https://arquivos.receitafederal.gov.br/public.php/webdav/2026-02/Estabelecimentos0.zip"
 
 
 @dataclass(frozen=True)

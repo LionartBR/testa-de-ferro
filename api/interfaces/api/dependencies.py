@@ -22,6 +22,7 @@ def get_ficha_service() -> FichaService:
         sancao_repo=DuckDBSancaoRepo(conn),
         societario_repo=DuckDBSocietarioRepo(conn),
         doacao_repo=DuckDBDoacaoRepo(conn),
+        alerta_repo=DuckDBAlertaRepo(conn),
     )
 
 

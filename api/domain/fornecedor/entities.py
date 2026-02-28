@@ -45,3 +45,5 @@ class Fornecedor:
     score_risco: ScoreDeRisco | None = None
     total_contratos: int = 0
     valor_total_contratos: Decimal = Decimal("0")
+    qtd_fornecedores_mesmo_endereco: int = 0
+    qtd_funcionarios: int | None = None  # None = RAIS indisponivel (fail-safe)

@@ -22,12 +22,20 @@ class DuckDBFornecedorRepo:
 
     def buscar_por_cnpj(self, cnpj: CNPJ) -> Fornecedor | None:
         row = self._conn.execute(
-            "SELECT * FROM dim_fornecedor WHERE cnpj = ?",
+            """SELECT df.*,
+                      (SELECT count(*) FROM dim_fornecedor df2
+                       WHERE df2.logradouro = df.logradouro
+                         AND df2.logradouro IS NOT NULL
+                         AND df2.logradouro != ''
+                         AND df2.pk_fornecedor != df.pk_fornecedor) AS qtd_mesmo_endereco
+               FROM dim_fornecedor df
+               WHERE df.cnpj = ?""",
             [cnpj.formatado],
         ).fetchone()
         if row is None:
             return None
-        return self._hidratar(row)
+        # df.* has 20 columns (0..19), qtd_mesmo_endereco is appended at index 20
+        return self._hidratar(row, qtd_mesmo_endereco_idx=20)
 
     def ranking_por_score(self, limit: int, offset: int) -> list[Fornecedor]:
         rows = self._conn.execute(
@@ -50,13 +58,25 @@ class DuckDBFornecedorRepo:
         row = self._conn.execute("SELECT count(*) FROM dim_fornecedor").fetchone()
         return int(row[0]) if row else 0
 
-    def _hidratar(self, row: tuple) -> Fornecedor:  # type: ignore[type-arg]
+    def _hidratar(self, row: tuple, *, qtd_mesmo_endereco_idx: int | None = None) -> Fornecedor:  # type: ignore[type-arg]
         """Mapeia row do DuckDB para entidade de dominio.
-        Colunas: pk(0), cnpj(1), razao_social(2), data_abertura(3),
+        Colunas dim_fornecedor: pk(0), cnpj(1), razao_social(2), data_abertura(3),
         capital_social(4), cnae_principal(5), cnae_descricao(6),
         logradouro(7), municipio(8), uf(9), cep(10), situacao(11),
         score_risco(12), faixa_risco(13), qtd_alertas(14), max_severidade(15),
-        total_contratos(16), valor_total(17), atualizado_em(18)"""
+        total_contratos(16), valor_total(17), qtd_funcionarios(18),
+        atualizado_em(19).
+        qtd_mesmo_endereco_idx: position of the subquery alias, if present."""
+        qtd_func = int(row[18]) if len(row) > 18 and row[18] is not None else None
+        qtd_mesmo = (
+            int(row[qtd_mesmo_endereco_idx])
+            if (
+                qtd_mesmo_endereco_idx is not None
+                and len(row) > qtd_mesmo_endereco_idx
+                and row[qtd_mesmo_endereco_idx] is not None
+            )
+            else 0
+        )
         return Fornecedor(
             cnpj=CNPJ(str(row[1])),
             razao_social=RazaoSocial(str(row[2])),
@@ -75,4 +95,6 @@ class DuckDBFornecedorRepo:
             situacao=SituacaoCadastral(str(row[11])) if row[11] else SituacaoCadastral.ATIVA,
             total_contratos=int(row[16]) if row[16] else 0,
             valor_total_contratos=Decimal(str(row[17])) if row[17] else Decimal("0"),
+            qtd_funcionarios=qtd_func,
+            qtd_fornecedores_mesmo_endereco=qtd_mesmo,
         )

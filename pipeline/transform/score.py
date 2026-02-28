@@ -98,6 +98,7 @@ def calcular_scores_batch(
     rows.extend(_cnae_incompativel_batch(empresas_df, contratos_df, calculado_em))
     rows.extend(_mesmo_endereco_batch(empresas_df, calculado_em))
     rows.extend(_crescimento_subito_batch(empresas_df, contratos_df, calculado_em))
+    rows.extend(_sem_funcionarios_batch(empresas_df, contratos_df, calculado_em))
 
     if not rows:
         return _empty_score_df()
@@ -556,6 +557,80 @@ def _crescimento_subito_batch(
                     f"ano_anterior={row['ano'] - 1}, valor_anterior={row['valor_prev']:.2f}, "
                     f"ano_atual={row['ano']}, valor_atual={row['valor_anual']:.2f}, razao={razao:.1f}x"
                 ),
+                "calculado_em": calculado_em,
+            }
+        )
+    return rows
+
+
+def _sem_funcionarios_batch(
+    empresas_df: pl.DataFrame,
+    contratos_df: pl.DataFrame,
+    calculado_em: datetime,
+) -> list[dict[str, object]]:
+    """SEM_FUNCIONARIOS: qtd_funcionarios == 0 with at least one active contract.
+
+    This indicator flags companies that report zero employees in RAIS but have
+    government contracts. A legitimate company cannot execute contracts with
+    zero staff — this pattern is a strong signal of a shell company.
+
+    The indicator only activates when empresas_df carries the qtd_funcionarios
+    column (populated by the RAIS enrichment step in main.py). If the column
+    is absent (e.g. RAIS was not yet merged), the function returns no rows
+    rather than crashing, preserving the defensive-guard pattern used by all
+    other indicators.
+
+    Args:
+        empresas_df:  dim_fornecedor staging DataFrame. May contain
+                      qtd_funcionarios (int | null) if RAIS was merged.
+        contratos_df: fato_contrato staging DataFrame.
+        calculado_em: Timestamp of the batch computation.
+
+    Returns:
+        One dict per flagged fornecedor, with fato_score_detalhe columns.
+    """
+    # Guard: indicator requires the RAIS enrichment column.
+    if "qtd_funcionarios" not in empresas_df.columns:
+        return []
+
+    if "pk_fornecedor" not in empresas_df.columns:
+        return []
+
+    if contratos_df.is_empty() or "fk_fornecedor" not in contratos_df.columns:
+        return []
+
+    # Find fornecedores with qtd_funcionarios == 0 (not null — null means
+    # RAIS data was not available for that CNPJ, which is different from
+    # explicitly reporting zero employees).
+    sem_func = empresas_df.filter(pl.col("qtd_funcionarios").is_not_null() & (pl.col("qtd_funcionarios") == 0)).select(
+        ["pk_fornecedor"]
+    )
+
+    if sem_func.is_empty():
+        return []
+
+    # Cross with contratos to keep only those that actually have contracts.
+    fornecedores_com_contrato = contratos_df.select("fk_fornecedor").unique()
+
+    flagged = sem_func.join(
+        fornecedores_com_contrato,
+        left_on="pk_fornecedor",
+        right_on="fk_fornecedor",
+        how="inner",
+    )
+
+    if flagged.is_empty():
+        return []
+
+    rows: list[dict[str, object]] = []
+    for row in flagged.iter_rows(named=True):
+        rows.append(
+            {
+                "fk_fornecedor": row["pk_fornecedor"],
+                "indicador": "SEM_FUNCIONARIOS",
+                "peso": _PESO_SEM_FUNCIONARIOS,
+                "descricao": "Empresa declara zero funcionarios no RAIS mas possui contratos governamentais",
+                "evidencia": "qtd_funcionarios=0, contratos_governamentais=sim",
                 "calculado_em": calculado_em,
             }
         )

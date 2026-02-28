@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 from api.domain.fornecedor.value_objects import CNPJ
-from api.infrastructure.repositories.duckdb_societario_repo import DuckDBSocietarioRepo
+from api.domain.societario.repository import SocietarioRepository
 
 from ..dtos.grafo_dto import ArestaDTO, GrafoDTO, NoDTO
 
 
 class GrafoService:
-    def __init__(self, societario_repo: DuckDBSocietarioRepo) -> None:
+    def __init__(self, societario_repo: SocietarioRepository) -> None:
         self._societario_repo = societario_repo
 
     def obter_grafo(self, cnpj: CNPJ, max_nos: int = 50) -> GrafoDTO:

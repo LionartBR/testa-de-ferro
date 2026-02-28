@@ -20,6 +20,12 @@ from pathlib import Path
 import polars as pl
 
 # All staging files that must be present and non-empty before the DuckDB build.
+#
+# ADR: rais is included as a required source even though the MTE endpoint may
+# occasionally be unavailable. If RAIS is missing, the SEM_FUNCIONARIOS
+# indicator silently produces no rows (the indicator is guarded by a column
+# existence check in score.py). Making it required forces the operator to
+# investigate rather than silently skip a key indicator.
 REQUIRED_SOURCES: tuple[str, ...] = (
     "empresas",
     "qsa",
@@ -27,6 +33,7 @@ REQUIRED_SOURCES: tuple[str, ...] = (
     "sancoes",
     "servidores",
     "doacoes",
+    "rais",
 )
 
 
