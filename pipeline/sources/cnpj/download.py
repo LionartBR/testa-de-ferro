@@ -17,6 +17,8 @@ from pathlib import Path
 
 import httpx
 
+from pipeline.log import log
+
 _SHARE_TOKEN = "YggdBLfdninEJX9"  # noqa: S105  — public share token, not a password
 _WEBDAV_BASE = "https://arquivos.receitafederal.gov.br/public.php/webdav"
 
@@ -72,9 +74,13 @@ def download_cnpj(url: str, raw_dir: Path, timeout: int = 300) -> Path:
         headers=headers,
     ) as response:
         response.raise_for_status()
+        downloaded = 0
         with zip_path.open("wb") as file_handle:
             for chunk in response.iter_bytes(chunk_size=8 * 1024 * 1024):
                 file_handle.write(chunk)
+                downloaded += len(chunk)
+                if downloaded % (50 * 1024 * 1024) < len(chunk):
+                    log(f"  {zip_name}: {downloaded // (1024 * 1024)} MB downloaded...")
 
     # Extract the first CSV from the ZIP archive.
     with zipfile.ZipFile(zip_path) as archive:

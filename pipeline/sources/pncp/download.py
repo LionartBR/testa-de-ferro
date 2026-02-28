@@ -12,13 +12,14 @@
 from __future__ import annotations
 
 import json
-import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+from pipeline.log import log
 
 _PAGE_SIZE = 500
 _MAX_WORKERS = 6
@@ -81,11 +82,11 @@ def download_pncp(
             di, df = futures[future]
             records = future.result()
             all_records.extend(records)
-            _log(f"  PNCP {di}-{df}: {len(records)} contratos")
+            log(f"  PNCP {di}-{df}: {len(records)} contratos")
 
     merged = {"data": all_records, "totalRegistros": len(all_records)}
     output_path.write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")
-    _log(f"  PNCP total: {len(all_records)} contratos")
+    log(f"  PNCP total: {len(all_records)} contratos")
 
     return output_path
 
@@ -125,6 +126,8 @@ def _fetch_window(
         records.extend(page_records)
 
         total_pages = int(payload.get("totalPaginas", 1))
+        if page % 10 == 0:
+            log(f"  PNCP {data_inicial}-{data_final}: page {page}/{total_pages}")
         if page >= total_pages:
             break
         page += 1
@@ -132,6 +135,4 @@ def _fetch_window(
     return records
 
 
-def _log(message: str) -> None:
-    sys.stdout.write(f"[pipeline] {message}\n")
-    sys.stdout.flush()
+

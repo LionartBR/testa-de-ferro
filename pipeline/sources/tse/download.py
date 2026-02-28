@@ -13,6 +13,8 @@ from pathlib import Path
 
 import httpx
 
+from pipeline.log import log
+
 
 def download_doacoes(url: str, raw_dir: Path, timeout: int = 300) -> Path:
     """Download and extract the TSE doacoes dataset.
@@ -34,9 +36,13 @@ def download_doacoes(url: str, raw_dir: Path, timeout: int = 300) -> Path:
 
     with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:
         resp.raise_for_status()
+        downloaded = 0
         with zip_path.open("wb") as fh:
             for chunk in resp.iter_bytes(chunk_size=8 * 1024 * 1024):
                 fh.write(chunk)
+                downloaded += len(chunk)
+                if downloaded % (50 * 1024 * 1024) < len(chunk):
+                    log(f"  {zip_name}: {downloaded // (1024 * 1024)} MB downloaded...")
 
     with zipfile.ZipFile(zip_path) as archive:
         csv_names = [n for n in archive.namelist() if n.lower().endswith(".csv")]

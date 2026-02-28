@@ -21,12 +21,12 @@
 # successfully and completude validation passed.
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import polars as pl
 
 from pipeline.config import PipelineConfig, load_config
+from pipeline.log import log
 from pipeline.output.build_duckdb import build_duckdb
 from pipeline.output.completude import validar_completude
 from pipeline.staging.parquet_writer import read_parquet, write_parquet
@@ -59,7 +59,7 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
         _run_sources(config)
 
     # ---- Read staging data ----
-    _log("Reading staging parquets...")
+    log("Reading staging parquets...")
     empresas_df = read_parquet(staging_dir / "empresas.parquet")
     qsa_df = read_parquet(staging_dir / "qsa.parquet")
     contratos_df = read_parquet(staging_dir / "contratos.parquet")
@@ -68,10 +68,11 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
     doacoes_df = read_parquet(staging_dir / "doacoes.parquet")
 
     # ---- Transforms ----
-    _log("Running transforms...")
+    log("Running transforms...")
 
     # 1. Match servidores against socios (needs cpf_parcial, so run BEFORE HMAC)
     socios_enriched = match_servidor_socio(qsa_df, servidores_df)
+    log(f"  Servidor-socio match: {len(socios_enriched):,} rows")
 
     # 2. HMAC CPFs in enriched socios (if cpf column exists)
     if "cpf_parcial" in socios_enriched.columns:
@@ -79,29 +80,32 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
 
     # 3. Cross-reference enrichments
     socios_enriched = enriquecer_socios(socios_enriched, sancoes_df, empresas_df)
+    log(f"  Enriched socios: {len(socios_enriched):,} rows")
 
     # 4. Pre-compute scores
-    _log("Computing scores...")
+    log("Computing scores...")
     scores_df = calcular_scores_batch(empresas_df, socios_enriched, contratos_df, sancoes_df)
     write_parquet(scores_df, staging_dir / "score_detalhe.parquet")
+    log(f"  Scores: {len(scores_df):,} rows")
 
     # 5. Pre-compute alerts
-    _log("Computing alerts...")
+    log("Computing alerts...")
     alertas_df = detectar_alertas_batch(empresas_df, socios_enriched, contratos_df, sancoes_df, doacoes_df)
     write_parquet(alertas_df, staging_dir / "alertas.parquet")
+    log(f"  Alertas: {len(alertas_df):,} rows")
 
     # 6. Write enriched socios to staging — rename to match dim_socio schema
     socios_for_staging = _prepare_socios_staging(socios_enriched)
     write_parquet(socios_for_staging, staging_dir / "socios.parquet")
 
     # ---- Validate completude ----
-    _log("Validating completude...")
+    log("Validating completude...")
     validar_completude(staging_dir)
 
     # ---- Build DuckDB ----
-    _log("Building DuckDB...")
+    log("Building DuckDB...")
     output_path = build_duckdb(staging_dir, config.duckdb_output_path)
-    _log(f"Done. DuckDB written to: {output_path}")
+    log(f"Done. DuckDB written to: {output_path}")
     return output_path
 
 
@@ -176,7 +180,7 @@ def _run_sources(config: PipelineConfig) -> None:
     t = config.download_timeout
 
     # ---- Phase 1: Parallel downloads ----
-    _log("Downloading all sources in parallel...")
+    log("Downloading all sources in parallel...")
     DownloadFn = Callable[[str, Path, int], Path]
     download_tasks: dict[str, tuple[DownloadFn, str, Path, int]] = {
         "cnpj_empresas": (download_cnpj, urls.cnpj_empresas, raw_dir / "cnpj", t),
@@ -197,19 +201,22 @@ def _run_sources(config: PipelineConfig) -> None:
         for future in as_completed(future_to_name):
             name = future_to_name[future]
             raw_paths[name] = future.result()  # raises on error
-            _log(f"  Downloaded: {name}")
+            log(f"  Downloaded: {name}")
 
     # ---- Phase 2: Parse + validate (sequential, CPU-bound) ----
-    _log("Parsing and validating...")
+    log("Parsing and validating...")
 
     empresas_df = validate_empresas(parse_empresas(raw_paths["cnpj_empresas"]))
     write_parquet(empresas_df, staging_dir / "empresas.parquet")
+    log(f"  Parsed empresas: {len(empresas_df):,} rows")
 
     qsa_df = validate_qsa(parse_qsa(raw_paths["cnpj_qsa"]))
     write_parquet(qsa_df, staging_dir / "qsa.parquet")
+    log(f"  Parsed qsa: {len(qsa_df):,} rows")
 
     contratos_df = validate_contratos(parse_contratos(raw_paths["pncp"]))
     write_parquet(contratos_df, staging_dir / "contratos.parquet")
+    log(f"  Parsed contratos: {len(contratos_df):,} rows")
 
     sancoes_all = pl.concat(
         [
@@ -220,18 +227,15 @@ def _run_sources(config: PipelineConfig) -> None:
     )
     sancoes_df = validate_sancoes(sancoes_all)
     write_parquet(sancoes_df, staging_dir / "sancoes.parquet")
+    log(f"  Parsed sancoes: {len(sancoes_df):,} rows")
 
     servidores_df = validate_servidores(parse_servidores(raw_paths["servidores"]))
     write_parquet(servidores_df, staging_dir / "servidores.parquet")
+    log(f"  Parsed servidores: {len(servidores_df):,} rows")
 
     doacoes_df = validate_doacoes(parse_doacoes(raw_paths["tse"]))
     write_parquet(doacoes_df, staging_dir / "doacoes.parquet")
-
-
-def _log(message: str) -> None:
-    """Simple stdout logger for pipeline progress."""
-    sys.stdout.write(f"[pipeline] {message}\n")
-    sys.stdout.flush()
+    log(f"  Parsed doacoes: {len(doacoes_df):,} rows")
 
 
 if __name__ == "__main__":

@@ -32,6 +32,8 @@ from pathlib import Path
 
 import duckdb
 
+from pipeline.log import log
+
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 # ---------------------------------------------------------------------------
@@ -126,10 +128,13 @@ def _load_staging_data(conn: duckdb.DuckDBPyConnection, staging_dir: Path) -> No
         conn:        Open DuckDB connection to the database being built.
         staging_dir: Directory containing staging ``.parquet`` files.
     """
+    loaded = 0
     for file_stem, table_name in STAGING_TO_TABLE.items():
         parquet_path = staging_dir / f"{file_stem}.parquet"
         if not parquet_path.exists():
             continue
+
+        log(f"  Loading {file_stem} -> {table_name}...")
 
         # Get the table's column names so we only SELECT matching columns.
         # Staging parquets may carry extra columns used by transforms that
@@ -163,6 +168,9 @@ def _load_staging_data(conn: duckdb.DuckDBPyConnection, staging_dir: Path) -> No
             f"INSERT INTO {table_name} ({cols_sql}) "  # noqa: S608
             f"SELECT {cols_sql} FROM read_parquet('{posix_path}')"
         )
+        loaded += 1
+
+    log(f"  DuckDB: {loaded} tables loaded")
 
 
 def validate_tables(output_path: Path) -> dict[str, int]:
