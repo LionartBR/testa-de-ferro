@@ -1,0 +1,45 @@
+# api/domain/fornecedor/enums.py
+from enum import StrEnum
+
+
+class TipoAlerta(StrEnum):
+    """Tipos de alerta critico — flags binarias independentes do score."""
+    SOCIO_SERVIDOR_PUBLICO = "SOCIO_SERVIDOR_PUBLICO"
+    RODIZIO_LICITACAO = "RODIZIO_LICITACAO"
+    EMPRESA_SANCIONADA_CONTRATANDO = "EMPRESA_SANCIONADA_CONTRATANDO"
+    DOACAO_PARA_CONTRATANTE = "DOACAO_PARA_CONTRATANTE"
+    SOCIO_SANCIONADO_EM_OUTRA = "SOCIO_SANCIONADO_EM_OUTRA"
+    TESTA_DE_FERRO = "TESTA_DE_FERRO"
+
+
+class Severidade(StrEnum):
+    GRAVE = "GRAVE"
+    GRAVISSIMO = "GRAVISSIMO"
+
+
+class TipoIndicador(StrEnum):
+    """Indicadores cumulativos que compoem o score. Nunca geram alerta."""
+    CAPITAL_SOCIAL_BAIXO = "CAPITAL_SOCIAL_BAIXO"
+    EMPRESA_RECENTE = "EMPRESA_RECENTE"
+    CNAE_INCOMPATIVEL = "CNAE_INCOMPATIVEL"
+    SOCIO_EM_MULTIPLAS_FORNECEDORAS = "SOCIO_EM_MULTIPLAS_FORNECEDORAS"
+    MESMO_ENDERECO = "MESMO_ENDERECO"
+    FORNECEDOR_EXCLUSIVO = "FORNECEDOR_EXCLUSIVO"
+    SEM_FUNCIONARIOS = "SEM_FUNCIONARIOS"
+    CRESCIMENTO_SUBITO = "CRESCIMENTO_SUBITO"
+    SANCAO_HISTORICA = "SANCAO_HISTORICA"
+
+
+class FaixaRisco(StrEnum):
+    BAIXO = "Baixo"          # 0-20
+    MODERADO = "Moderado"    # 21-40
+    ALTO = "Alto"            # 41-65
+    CRITICO = "Critico"      # 66-100
+
+
+class SituacaoCadastral(StrEnum):
+    ATIVA = "ATIVA"
+    SUSPENSA = "SUSPENSA"
+    INAPTA = "INAPTA"
+    BAIXADA = "BAIXADA"
+    NULA = "NULA"
