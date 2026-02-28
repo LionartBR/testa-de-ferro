@@ -10,6 +10,7 @@ from api.domain.fornecedor.enums import FaixaRisco, SituacaoCadastral, TipoIndic
 from api.domain.fornecedor.value_objects import CNPJ, CapitalSocial, RazaoSocial
 from api.domain.sancao.entities import Sancao
 from api.domain.sancao.value_objects import TipoSancao
+from api.domain.societario.entities import Socio
 
 
 def _fornecedor(
@@ -27,10 +28,10 @@ def _fornecedor(
     )
 
 
-def _contrato(valor: Decimal = Decimal("500000")) -> Contrato:
+def _contrato(valor: Decimal = Decimal("500000"), orgao: str = "00001") -> Contrato:
     return Contrato(
         fornecedor_cnpj=CNPJ("11222333000181"),
-        orgao_codigo="00001",
+        orgao_codigo=orgao,
         valor=ValorContrato(valor),
         data_assinatura=date(2025, 6, 1),
     )
@@ -137,6 +138,85 @@ def test_sancao_vigente_nao_gera_indicador_historica():
     assert not any(i.tipo == TipoIndicador.SANCAO_HISTORICA for i in score.indicadores)
 
 
+# ---------- SOCIO_EM_MULTIPLAS_FORNECEDORAS (peso 20) ----------
+
+def test_socio_em_3_ou_mais_empresas_ativa_indicador():
+    """Socio com qtd_empresas_governo >= 3 -> ativa indicador peso 20."""
+    socio = Socio(cpf_hmac="abc", nome="Joao", qtd_empresas_governo=3)
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(),
+        socios=[socio], sancoes=[], contratos=[],
+        referencia=date(2026, 2, 27),
+    )
+    ind = [i for i in score.indicadores if i.tipo == TipoIndicador.SOCIO_EM_MULTIPLAS_FORNECEDORAS]
+    assert len(ind) == 1
+    assert ind[0].peso == 20
+
+
+def test_socio_em_2_empresas_nao_ativa():
+    """Socio com qtd_empresas_governo = 2 -> nao ativa."""
+    socio = Socio(cpf_hmac="abc", nome="Joao", qtd_empresas_governo=2)
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(),
+        socios=[socio], sancoes=[], contratos=[],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.SOCIO_EM_MULTIPLAS_FORNECEDORAS for i in score.indicadores)
+
+
+def test_multiplos_socios_em_multiplas_gera_um_indicador():
+    """Mesmo com varios socios qualificados, gera apenas 1 indicador."""
+    socios = [
+        Socio(cpf_hmac="a", nome="Joao", qtd_empresas_governo=5),
+        Socio(cpf_hmac="b", nome="Maria", qtd_empresas_governo=4),
+    ]
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(),
+        socios=socios, sancoes=[], contratos=[],
+        referencia=date(2026, 2, 27),
+    )
+    ind = [i for i in score.indicadores if i.tipo == TipoIndicador.SOCIO_EM_MULTIPLAS_FORNECEDORAS]
+    assert len(ind) == 1
+
+
+# ---------- FORNECEDOR_EXCLUSIVO (peso 10) ----------
+
+def test_fornecedor_todos_contratos_mesmo_orgao_ativa():
+    """Todos contratos com mesmo orgao -> ativa indicador peso 10."""
+    contratos = [_contrato(orgao="26000"), _contrato(Decimal("100000"), orgao="26000")]
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(),
+        socios=[], sancoes=[],
+        contratos=contratos,
+        referencia=date(2026, 2, 27),
+    )
+    ind = [i for i in score.indicadores if i.tipo == TipoIndicador.FORNECEDOR_EXCLUSIVO]
+    assert len(ind) == 1
+    assert ind[0].peso == 10
+
+
+def test_fornecedor_contratos_multiplos_orgaos_nao_ativa():
+    """Contratos com orgaos diferentes -> nao ativa."""
+    contratos = [_contrato(orgao="26000"), _contrato(orgao="54000")]
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(),
+        socios=[], sancoes=[],
+        contratos=contratos,
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.FORNECEDOR_EXCLUSIVO for i in score.indicadores)
+
+
+def test_fornecedor_sem_contratos_nao_ativa_exclusivo():
+    """Sem contratos -> nao ativa."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(),
+        socios=[], sancoes=[], contratos=[],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(i.tipo == TipoIndicador.FORNECEDOR_EXCLUSIVO for i in score.indicadores)
+
+
 # ---------- SCORE GERAL ----------
 
 def test_score_nunca_excede_100():
@@ -146,7 +226,7 @@ def test_score_nunca_excede_100():
             capital=Decimal("100"),
             data_abertura=date(2025, 5, 1),
         ),
-        socios=[],
+        socios=[Socio(cpf_hmac="a", nome="Joao", qtd_empresas_governo=5)],
         sancoes=[Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU",
                         data_inicio=date(2020, 1, 1), data_fim=date(2022, 12, 31))],
         contratos=[_contrato(Decimal("200000"))],
@@ -166,16 +246,35 @@ def test_sem_indicadores_score_zero():
 
 
 def test_faixa_risco_moderado():
-    """Score 15 (capital baixo) = Baixo; score 25 = Moderado."""
+    """Score 15 (capital baixo) + 10 (empresa recente) = 25 -> Moderado.
+    Usa 2 orgaos distintos para nao ativar FORNECEDOR_EXCLUSIVO."""
     score = calcular_score_cumulativo(
         fornecedor=_fornecedor(
             capital=Decimal("100"),
             data_abertura=date(2025, 5, 1),
         ),
         socios=[], sancoes=[],
-        contratos=[_contrato(Decimal("200000"))],
+        contratos=[_contrato(Decimal("100000"), orgao="26000"),
+                   _contrato(Decimal("100000"), orgao="54000")],
         referencia=date(2026, 2, 27),
     )
     # capital_baixo(15) + empresa_recente(10) = 25 -> Moderado
     assert score.valor == 25
     assert score.faixa == FaixaRisco.MODERADO
+
+
+def test_score_com_todos_novos_indicadores():
+    """capital_baixo(15) + empresa_recente(10) + sancao(5) + multiplas(20) + exclusivo(10) = 60 -> Alto."""
+    score = calcular_score_cumulativo(
+        fornecedor=_fornecedor(
+            capital=Decimal("100"),
+            data_abertura=date(2025, 5, 1),
+        ),
+        socios=[Socio(cpf_hmac="a", nome="Joao", qtd_empresas_governo=5)],
+        sancoes=[Sancao(tipo=TipoSancao.CEIS, orgao_sancionador="CGU",
+                        data_inicio=date(2020, 1, 1), data_fim=date(2022, 12, 31))],
+        contratos=[_contrato(Decimal("200000"))],
+        referencia=date(2026, 2, 27),
+    )
+    assert score.valor == 60
+    assert score.faixa == FaixaRisco.ALTO

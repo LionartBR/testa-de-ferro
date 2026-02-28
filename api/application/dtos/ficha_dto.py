@@ -6,6 +6,7 @@ from datetime import date
 from pydantic import BaseModel
 
 from api.domain.contrato.entities import Contrato
+from api.domain.doacao.entities import DoacaoEleitoral
 from api.domain.fornecedor.entities import AlertaCritico, Fornecedor
 from api.domain.fornecedor.score import ScoreDeRisco
 from api.domain.sancao.entities import Sancao
@@ -13,7 +14,7 @@ from api.domain.societario.entities import Socio
 
 from .alerta_dto import AlertaCriticoDTO
 from .contrato_dto import ContratoResumoDTO
-from .fornecedor_dto import SancaoDTO, SocioDTO
+from .fornecedor_dto import DoacaoDTO, SancaoDTO, SocioDTO
 from .score_dto import IndicadorDTO, ScoreDTO
 
 
@@ -33,6 +34,7 @@ class FichaCompletaDTO(BaseModel):
     socios: list[SocioDTO]
     sancoes: list[SancaoDTO]
     contratos: list[ContratoResumoDTO]
+    doacoes: list[DoacaoDTO]
     disclaimer: str = (
         "Dados gerados automaticamente a partir de bases publicas. "
         "Nao constituem acusacao. Correlacao nao implica causalidade."
@@ -48,6 +50,7 @@ class FichaCompletaDTO(BaseModel):
         socios: list[Socio],
         sancoes: list[Sancao],
         referencia: date,
+        doacoes: list[DoacaoEleitoral] | None = None,
     ) -> FichaCompletaDTO:
         return cls(
             cnpj=fornecedor.cnpj.formatado,
@@ -115,5 +118,16 @@ class FichaCompletaDTO(BaseModel):
                     objeto=c.objeto,
                 )
                 for c in contratos
+            ],
+            doacoes=[
+                DoacaoDTO(
+                    candidato_nome=d.candidato_nome,
+                    candidato_partido=d.candidato_partido,
+                    candidato_cargo=d.candidato_cargo,
+                    valor=str(d.valor.valor),
+                    ano_eleicao=d.ano_eleicao,
+                    via_socio=d.socio_cpf_hmac is not None,
+                )
+                for d in (doacoes or [])
             ],
         )

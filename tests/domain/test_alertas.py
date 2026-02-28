@@ -5,6 +5,8 @@ from decimal import Decimal
 from api.application.services.alerta_service import detectar_alertas
 from api.domain.contrato.entities import Contrato
 from api.domain.contrato.value_objects import ValorContrato
+from api.domain.doacao.entities import DoacaoEleitoral
+from api.domain.doacao.value_objects import ValorDoacao
 from api.domain.fornecedor.entities import Fornecedor
 from api.domain.fornecedor.enums import (
     Severidade,
@@ -27,12 +29,24 @@ def _fornecedor(**kwargs: object) -> Fornecedor:
     return Fornecedor(**defaults)  # type: ignore[arg-type]
 
 
-def _contrato(valor: Decimal = Decimal("500000")) -> Contrato:
+def _contrato(valor: Decimal = Decimal("500000"), orgao: str = "00001") -> Contrato:
     return Contrato(
         fornecedor_cnpj=CNPJ("11222333000181"),
-        orgao_codigo="00001",
+        orgao_codigo=orgao,
         valor=ValorContrato(valor),
         data_assinatura=date(2025, 6, 1),
+    )
+
+
+def _doacao(valor: Decimal = Decimal("15000")) -> DoacaoEleitoral:
+    return DoacaoEleitoral(
+        fornecedor_cnpj=CNPJ("11222333000181"),
+        socio_cpf_hmac=None,
+        candidato_nome="Dep. Fulano",
+        candidato_partido="PXX",
+        candidato_cargo="Deputado Federal",
+        valor=ValorDoacao(valor),
+        ano_eleicao=2022,
     )
 
 
@@ -136,3 +150,90 @@ def test_sem_socios_e_sem_sancoes_retorna_lista_vazia():
         referencia=date(2026, 2, 27),
     )
     assert alertas == []
+
+
+# ---------- DOACAO_PARA_CONTRATANTE ----------
+
+def test_doacao_material_com_contrato_alto_gera_alerta():
+    """Doacao > R$10k + contratos > R$500k -> alerta GRAVE."""
+    alertas = detectar_alertas(
+        fornecedor=_fornecedor(),
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato(Decimal("600000"))],
+        referencia=date(2026, 2, 27),
+        doacoes=[_doacao(Decimal("15000"))],
+    )
+    doacao_alertas = [a for a in alertas if a.tipo == TipoAlerta.DOACAO_PARA_CONTRATANTE]
+    assert len(doacao_alertas) == 1
+    assert doacao_alertas[0].severidade == Severidade.GRAVE
+
+
+def test_doacao_abaixo_threshold_nao_gera_alerta():
+    """Doacao < R$10k -> sem alerta mesmo com contratos altos."""
+    alertas = detectar_alertas(
+        fornecedor=_fornecedor(),
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato(Decimal("600000"))],
+        referencia=date(2026, 2, 27),
+        doacoes=[_doacao(Decimal("5000"))],
+    )
+    assert not any(a.tipo == TipoAlerta.DOACAO_PARA_CONTRATANTE for a in alertas)
+
+
+def test_doacao_sem_contrato_alto_nao_gera_alerta():
+    """Doacao material mas contratos < R$500k -> sem alerta."""
+    alertas = detectar_alertas(
+        fornecedor=_fornecedor(),
+        socios=[],
+        sancoes=[],
+        contratos=[_contrato(Decimal("100000"))],
+        referencia=date(2026, 2, 27),
+        doacoes=[_doacao(Decimal("15000"))],
+    )
+    assert not any(a.tipo == TipoAlerta.DOACAO_PARA_CONTRATANTE for a in alertas)
+
+
+def test_doacao_sem_contratos_nao_gera_alerta():
+    """Sem contratos -> sem alerta."""
+    alertas = detectar_alertas(
+        fornecedor=_fornecedor(),
+        socios=[],
+        sancoes=[],
+        contratos=[],
+        referencia=date(2026, 2, 27),
+        doacoes=[_doacao(Decimal("15000"))],
+    )
+    assert not any(a.tipo == TipoAlerta.DOACAO_PARA_CONTRATANTE for a in alertas)
+
+
+# ---------- SOCIO_SANCIONADO_EM_OUTRA ----------
+
+def test_socio_sancionado_gera_alerta_grave():
+    """Socio que e socio de outra empresa sancionada -> alerta GRAVE."""
+    socio = Socio(cpf_hmac="abc123", nome="Joao", is_sancionado=True)
+    alertas = detectar_alertas(
+        fornecedor=_fornecedor(),
+        socios=[socio],
+        sancoes=[],
+        contratos=[],
+        referencia=date(2026, 2, 27),
+    )
+    sancionados = [a for a in alertas if a.tipo == TipoAlerta.SOCIO_SANCIONADO_EM_OUTRA]
+    assert len(sancionados) == 1
+    assert sancionados[0].severidade == Severidade.GRAVE
+    assert "Joao" in sancionados[0].evidencia
+
+
+def test_socio_nao_sancionado_nao_gera_alerta():
+    """Socio sem sancao em outra empresa -> sem alerta."""
+    socio = Socio(cpf_hmac="abc123", nome="Joao", is_sancionado=False)
+    alertas = detectar_alertas(
+        fornecedor=_fornecedor(),
+        socios=[socio],
+        sancoes=[],
+        contratos=[],
+        referencia=date(2026, 2, 27),
+    )
+    assert not any(a.tipo == TipoAlerta.SOCIO_SANCIONADO_EM_OUTRA for a in alertas)

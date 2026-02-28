@@ -23,6 +23,9 @@ _CONTRATO_MINIMO_PARA_CAPITAL = Decimal("100000")
 # Empresa aberta ha menos de 6 meses antes do primeiro contrato.
 _MESES_EMPRESA_RECENTE = 6
 
+# Socio em multiplas fornecedoras: threshold de empresas com governo.
+_MULTIPLAS_FORNECEDORAS_THRESHOLD = 3
+
 
 def calcular_score_cumulativo(
     fornecedor: Fornecedor,
@@ -31,8 +34,7 @@ def calcular_score_cumulativo(
     contratos: list[Contrato],
     referencia: date,
 ) -> ScoreDeRisco:
-    """Funcao pura. Mesma entrada = mesma saida. Zero IO.
-    Fase 1: CAPITAL_SOCIAL_BAIXO, EMPRESA_RECENTE, SANCAO_HISTORICA."""
+    """Funcao pura. Mesma entrada = mesma saida. Zero IO."""
     indicadores: list[IndicadorCumulativo] = []
 
     ind = _avaliar_capital_social_baixo(fornecedor, contratos)
@@ -44,6 +46,14 @@ def calcular_score_cumulativo(
         indicadores.append(ind)
 
     ind = _avaliar_sancao_historica(sancoes, referencia)
+    if ind is not None:
+        indicadores.append(ind)
+
+    ind = _avaliar_socio_em_multiplas(socios)
+    if ind is not None:
+        indicadores.append(ind)
+
+    ind = _avaliar_fornecedor_exclusivo(contratos)
     if ind is not None:
         indicadores.append(ind)
 
@@ -123,4 +133,40 @@ def _avaliar_sancao_historica(
         peso=PESOS[TipoIndicador.SANCAO_HISTORICA],
         descricao=f"{len(expiradas)} sancao(oes) historica(s) expirada(s)",
         evidencia=f"sancoes_expiradas={[s.tipo.value for s in expiradas]}",
+    )
+
+
+def _avaliar_socio_em_multiplas(
+    socios: list[Socio],
+) -> IndicadorCumulativo | None:
+    """SOCIO_EM_MULTIPLAS_FORNECEDORAS (peso 20): socio com qtd_empresas_governo >= 3."""
+    socios_multiplas = [s for s in socios if s.qtd_empresas_governo >= _MULTIPLAS_FORNECEDORAS_THRESHOLD]
+    if not socios_multiplas:
+        return None
+
+    return IndicadorCumulativo(
+        tipo=TipoIndicador.SOCIO_EM_MULTIPLAS_FORNECEDORAS,
+        peso=PESOS[TipoIndicador.SOCIO_EM_MULTIPLAS_FORNECEDORAS],
+        descricao=f"{len(socios_multiplas)} socio(s) presente(s) em 3+ empresas fornecedoras do governo",
+        evidencia=f"socios={[(s.nome, s.qtd_empresas_governo) for s in socios_multiplas]}",
+    )
+
+
+def _avaliar_fornecedor_exclusivo(
+    contratos: list[Contrato],
+) -> IndicadorCumulativo | None:
+    """FORNECEDOR_EXCLUSIVO (peso 10): todos contratos com mesmo orgao."""
+    if not contratos:
+        return None
+
+    orgaos = {c.orgao_codigo for c in contratos}
+    if len(orgaos) > 1:
+        return None
+
+    orgao_unico = next(iter(orgaos))
+    return IndicadorCumulativo(
+        tipo=TipoIndicador.FORNECEDOR_EXCLUSIVO,
+        peso=PESOS[TipoIndicador.FORNECEDOR_EXCLUSIVO],
+        descricao=f"Todos os {len(contratos)} contrato(s) sao com o mesmo orgao",
+        evidencia=f"orgao_codigo={orgao_unico}, qtd_contratos={len(contratos)}",
     )

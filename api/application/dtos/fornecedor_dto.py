@@ -18,6 +18,15 @@ class SancaoDTO(BaseModel):
     vigente: bool
 
 
+class DoacaoDTO(BaseModel):
+    candidato_nome: str
+    candidato_partido: str
+    candidato_cargo: str
+    valor: str
+    ano_eleicao: int
+    via_socio: bool
+
+
 class FornecedorResumoDTO(BaseModel):
     cnpj: str
     razao_social: str
