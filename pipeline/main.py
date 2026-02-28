@@ -158,7 +158,7 @@ def _run_sources(config: PipelineConfig) -> None:
     from pipeline.sources.pncp.download import download_pncp
     from pipeline.sources.pncp.parse import parse_contratos
     from pipeline.sources.pncp.validate import validate_contratos
-    from pipeline.sources.sancoes.download import download_sancoes
+    from pipeline.sources.sancoes.download import download_ceis, download_cepim, download_cnep
     from pipeline.sources.sancoes.parse_ceis import parse_ceis
     from pipeline.sources.sancoes.parse_cepim import parse_cepim
     from pipeline.sources.sancoes.parse_cnep import parse_cnep
@@ -194,9 +194,9 @@ def _run_sources(config: PipelineConfig) -> None:
 
     # ---- Sancoes (CEIS + CNEP + CEPIM) ----
     _log("Source: Sanções...")
-    ceis_raw = download_sancoes(urls.ceis, raw_dir / "ceis", config.download_timeout)
-    cnep_raw = download_sancoes(urls.cnep, raw_dir / "cnep", config.download_timeout)
-    cepim_raw = download_sancoes(urls.cepim, raw_dir / "cepim", config.download_timeout)
+    ceis_raw = download_ceis(urls.ceis, raw_dir / "ceis", config.download_timeout)
+    cnep_raw = download_cnep(urls.cnep, raw_dir / "cnep", config.download_timeout)
+    cepim_raw = download_cepim(urls.cepim, raw_dir / "cepim", config.download_timeout)
     sancoes_all = pl.concat([
         parse_ceis(ceis_raw),
         parse_cnep(cnep_raw),
