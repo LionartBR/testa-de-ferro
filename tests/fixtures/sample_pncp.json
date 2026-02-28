@@ -1,0 +1,107 @@
+{
+  "data": [
+    {
+      "numeroContratoEmpenho": "CONTRATO-2024-001",
+      "numeroCompra": "COMPRA-001",
+      "orgaoEntidade": {
+        "cnpj": "00394460000141",
+        "razaoSocial": "MINISTERIO DA EDUCACAO",
+        "poderId": "E",
+        "esferaId": "F"
+      },
+      "fornecedor": {
+        "cnpjFormatado": "11.222.333/0001-81",
+        "razaoSocial": "EMPRESA TESTE LTDA"
+      },
+      "dataAssinatura": "2024-03-15",
+      "dataVigencia": "2025-03-15",
+      "valorInicial": 150000.00,
+      "objetoContrato": "Fornecimento de materiais didaticos para escolas publicas",
+      "modalidadeNome": "Pregão Eletrônico",
+      "modalidadeCodigo": "6"
+    },
+    {
+      "numeroContratoEmpenho": "CONTRATO-2024-002",
+      "numeroCompra": "COMPRA-002",
+      "orgaoEntidade": {
+        "cnpj": "00531954000177",
+        "razaoSocial": "MINISTERIO DA SAUDE",
+        "poderId": "E",
+        "esferaId": "F"
+      },
+      "fornecedor": {
+        "cnpjFormatado": "33.000.167/0001-01",
+        "razaoSocial": "EMPRESA LIMPA SA"
+      },
+      "dataAssinatura": "2024-01-10",
+      "dataVigencia": "2024-12-31",
+      "valorInicial": 3200000.00,
+      "objetoContrato": "Prestacao de servicos de TI e desenvolvimento de sistemas para o ministerio",
+      "modalidadeNome": "Concorrência",
+      "modalidadeCodigo": "5"
+    },
+    {
+      "numeroContratoEmpenho": "CONTRATO-2024-003",
+      "numeroCompra": "COMPRA-003",
+      "orgaoEntidade": {
+        "cnpj": "00394460000141",
+        "razaoSocial": "MINISTERIO DA EDUCACAO",
+        "poderId": "E",
+        "esferaId": "F"
+      },
+      "fornecedor": {
+        "cnpjFormatado": "55.666.777/0001-43",
+        "razaoSocial": "CONSTRUTORA ALPHA LTDA"
+      },
+      "dataAssinatura": "2023-11-20",
+      "dataVigencia": "2024-11-20",
+      "valorInicial": 800000.00,
+      "objetoContrato": "Construcao de salas de aula em escolas rurais do nordeste brasileiro",
+      "modalidadeNome": "Tomada de Preços",
+      "modalidadeCodigo": "4"
+    },
+    {
+      "numeroContratoEmpenho": "CONTRATO-2023-001",
+      "numeroCompra": "COMPRA-004",
+      "orgaoEntidade": {
+        "cnpj": "00394460000141",
+        "razaoSocial": "MINISTERIO DA EDUCACAO",
+        "poderId": "E",
+        "esferaId": "F"
+      },
+      "fornecedor": {
+        "cnpjFormatado": "66.777.888/0001-14",
+        "razaoSocial": "SERVICOS BETA SA"
+      },
+      "dataAssinatura": "2023-06-01",
+      "dataVigencia": "2024-05-31",
+      "valorInicial": 500000.00,
+      "objetoContrato": "Servicos de limpeza e conservacao predial nas dependencias do ministerio durante o periodo letivo",
+      "modalidadeNome": "Pregão Eletrônico",
+      "modalidadeCodigo": "6"
+    },
+    {
+      "numeroContratoEmpenho": "CONTRATO-2024-004",
+      "numeroCompra": "COMPRA-005",
+      "orgaoEntidade": {
+        "cnpj": "00531954000177",
+        "razaoSocial": "MINISTERIO DA SAUDE",
+        "poderId": "E",
+        "esferaId": "F"
+      },
+      "fornecedor": {
+        "cnpjFormatado": "99.000.111/0001-27",
+        "razaoSocial": "TECH SOLUTIONS LTDA"
+      },
+      "dataAssinatura": "2024-07-22",
+      "dataVigencia": "2025-07-22",
+      "valorInicial": 920000.00,
+      "objetoContrato": "Desenvolvimento e manutencao de plataforma digital de agendamento medico",
+      "modalidadeNome": "Pregão Eletrônico",
+      "modalidadeCodigo": "6"
+    }
+  ],
+  "totalRegistros": 5,
+  "pagina": 1,
+  "totalPaginas": 1
+}
