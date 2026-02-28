@@ -31,6 +31,12 @@ export type ApiState<T> =
   | SuccessState<T>
   | ErrorState;
 
+function toApiError(err: unknown): ApiError {
+  return err instanceof ApiError
+    ? err
+    : new ApiError(0, err instanceof Error ? err.message : "Erro desconhecido");
+}
+
 export function useApi<T>(
   fetcher: (() => Promise<T>) | null,
 ): ApiState<T> & { refetch: () => void } {
@@ -50,18 +56,33 @@ export function useApi<T>(
         setState({ status: "success", data, error: undefined });
       },
       (err: unknown) => {
-        const apiError =
-          err instanceof ApiError
-            ? err
-            : new ApiError(0, err instanceof Error ? err.message : "Erro desconhecido");
-        setState({ status: "error", data: undefined, error: apiError });
+        setState({ status: "error", data: undefined, error: toApiError(err) });
       },
     );
   }, [fetcher]);
 
   useEffect(() => {
-    execute();
-  }, [execute]);
+    if (!fetcher) return;
+
+    let cancelled = false;
+
+    fetcher().then(
+      (data) => {
+        if (!cancelled) {
+          setState({ status: "success", data, error: undefined });
+        }
+      },
+      (err: unknown) => {
+        if (!cancelled) {
+          setState({ status: "error", data: undefined, error: toApiError(err) });
+        }
+      },
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetcher]);
 
   return { ...state, refetch: execute };
 }
