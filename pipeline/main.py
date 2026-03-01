@@ -35,6 +35,7 @@ from pipeline.transform.cruzamentos import enriquecer_socios
 from pipeline.transform.grafo_societario import construir_grafo
 from pipeline.transform.hmac_cpf import apply_hmac_to_df
 from pipeline.transform.match_servidor_socio import match_servidor_socio
+from pipeline.transform.resolve_fks import resolver_fk_contratos, resolver_fk_doacoes, resolver_fk_sancoes
 from pipeline.transform.score import calcular_scores_batch
 
 
@@ -104,6 +105,37 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
         log(f"  Merged Comprasnet: {len(contratos_df):,} total contracts")
         del contratos_df, comprasnet_df
         gc.collect()
+
+    # ==== Phase A2: Resolve FKs in fact tables ====
+    # Loads empresas once (2 columns: pk_fornecedor, cnpj) and resolves
+    # fk_fornecedor in contratos, sancoes, and doacoes by joining on CNPJ.
+    # Each fact table is processed individually and freed to cap memory.
+    log("Phase A2: Resolving foreign keys...")
+    empresas_df = read_parquet(staging_dir / "empresas.parquet")
+
+    contratos_df = read_parquet(staging_dir / "contratos.parquet")
+    contratos_df = resolver_fk_contratos(contratos_df, empresas_df)
+    resolved_count = contratos_df.filter(pl.col("fk_fornecedor").is_not_null()).height
+    write_parquet(contratos_df, staging_dir / "contratos.parquet")
+    log(f"  Contratos FK resolved: {resolved_count:,} / {len(contratos_df):,}")
+    del contratos_df
+    gc.collect()
+
+    sancoes_df = read_parquet(staging_dir / "sancoes.parquet")
+    sancoes_df = resolver_fk_sancoes(sancoes_df, empresas_df)
+    resolved_count = sancoes_df.filter(pl.col("fk_fornecedor").is_not_null()).height
+    write_parquet(sancoes_df, staging_dir / "sancoes.parquet")
+    log(f"  Sancoes FK resolved: {resolved_count:,} / {len(sancoes_df):,}")
+    del sancoes_df
+    gc.collect()
+
+    doacoes_df = read_parquet(staging_dir / "doacoes.parquet")
+    doacoes_df = resolver_fk_doacoes(doacoes_df, empresas_df)
+    resolved_count = doacoes_df.filter(pl.col("fk_fornecedor").is_not_null()).height
+    write_parquet(doacoes_df, staging_dir / "doacoes.parquet")
+    log(f"  Doacoes FK resolved: {resolved_count:,} / {len(doacoes_df):,}")
+    del doacoes_df, empresas_df
+    gc.collect()
 
     # ==== Phase B: Servidor-socio match + HMAC + enrichments ====
     # Loads QSA + servidores, matches, then frees servidores.

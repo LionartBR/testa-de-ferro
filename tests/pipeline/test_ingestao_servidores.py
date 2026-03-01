@@ -100,3 +100,26 @@ def test_validate_rejeita_sem_nome() -> None:
 
     assert len(result) == 1
     assert result["nome"][0] == "MARIA OLIVEIRA"
+
+
+def test_download_extrai_cadastro_do_zip(tmp_path: Path) -> None:
+    """ZIP with multiple CSVs extracts *Cadastro* (not first alphabetically)."""
+    import zipfile
+
+    from pipeline.sources.servidores.download import _extract_cadastro_csv
+
+    zip_path = tmp_path / "servidores_202601.zip"
+    csv_files = [
+        "202601_Servidores_SIAPE_Afastamentos.csv",
+        "202601_Servidores_SIAPE_Cadastro.csv",
+        "202601_Servidores_SIAPE_Observacoes.csv",
+        "202601_Servidores_SIAPE_Remuneracao.csv",
+    ]
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for name in csv_files:
+            zf.writestr(name, "COL1;COL2\nval1;val2\n")
+
+    result = _extract_cadastro_csv(zip_path, tmp_path)
+
+    assert result.name == "202601_Servidores_SIAPE_Cadastro.csv"
+    assert result.exists()

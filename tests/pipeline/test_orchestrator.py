@@ -66,10 +66,13 @@ def _create_staging(staging_dir: Path) -> None:
     qsa.write_parquet(staging_dir / "qsa.parquet")
 
     # contratos.parquet — 2 contratos
+    # fk_fornecedor is NULL (matches real production data from PNCP parse).
+    # Phase A2 resolves it via cnpj_fornecedor → empresas.cnpj join.
     contratos = pl.DataFrame(
         {
             "pk_contrato": [1, 2],
-            "fk_fornecedor": [1, 2],
+            "cnpj_fornecedor": ["11222333000181", "33000167000101"],
+            "fk_fornecedor": pl.Series([None, None], dtype=pl.Int64),
             "fk_orgao": [1, 1],
             "fk_tempo": [1, 1],
             "fk_modalidade": pl.Series([None, None], dtype=pl.Int64),
@@ -84,10 +87,12 @@ def _create_staging(staging_dir: Path) -> None:
     contratos.write_parquet(staging_dir / "contratos.parquet")
 
     # sancoes.parquet — 1 vigente
+    # fk_fornecedor is NULL (matches real production data from sancoes parse).
+    # Phase A2 resolves it via cnpj → empresas.cnpj join.
     sancoes = pl.DataFrame(
         {
             "pk_sancao": [1],
-            "fk_fornecedor": [1],
+            "fk_fornecedor": pl.Series([None], dtype=pl.Int64),
             "cnpj": ["11.222.333/0001-81"],
             "cnpj_basico": ["11222333"],
             "tipo_sancao": ["CEIS"],
@@ -235,5 +240,38 @@ def test_run_pipeline_produces_alerts_and_scores(tmp_path: Path) -> None:
         col_names = [r[0] for r in cols_result]
         assert "tipo_alerta" in col_names
         assert "severidade" in col_names
+    finally:
+        conn.close()
+
+
+def test_run_pipeline_resolves_fk_fornecedor(tmp_path: Path) -> None:
+    """Phase A2 resolves NULL fk_fornecedor in contratos, sancoes, and doacoes."""
+    config = _make_config(tmp_path)
+    _create_staging(config.staging_dir)
+
+    result = run_pipeline(config, skip_download=True)
+
+    conn = duckdb.connect(str(result), read_only=True)
+    try:
+        # Contratos: both should have fk_fornecedor resolved (cnpj matched).
+        contratos_resolved = conn.execute(
+            "SELECT COUNT(*) FROM fato_contrato WHERE fk_fornecedor IS NOT NULL"
+        ).fetchone()
+        assert contratos_resolved is not None
+        assert contratos_resolved[0] == 2
+
+        # Sancoes: the CNPJ sanction should have fk_fornecedor resolved.
+        sancoes_resolved = conn.execute(
+            "SELECT COUNT(*) FROM dim_sancao WHERE fk_fornecedor IS NOT NULL"
+        ).fetchone()
+        assert sancoes_resolved is not None
+        assert sancoes_resolved[0] == 1
+
+        # Doacoes: the CNPJ doacao should have fk_fornecedor resolved.
+        doacoes_resolved = conn.execute(
+            "SELECT COUNT(*) FROM fato_doacao WHERE fk_fornecedor IS NOT NULL"
+        ).fetchone()
+        assert doacoes_resolved is not None
+        assert doacoes_resolved[0] == 1
     finally:
         conn.close()

@@ -80,10 +80,38 @@ def download_servidores(url: str, raw_dir: Path, timeout: int = 300) -> Path:
     else:
         log(f"  {zip_name}: already exists, skipping download")
 
+    return _extract_cadastro_csv(zip_path, raw_dir)
+
+
+def _extract_cadastro_csv(zip_path: Path, dest_dir: Path) -> Path:
+    """Extract the *Cadastro* CSV from a servidores ZIP archive.
+
+    The ZIP contains multiple CSVs (Afastamentos, Cadastro, Observacoes,
+    Remuneracao). We need Cadastro specifically because it contains
+    ORGAO_LOTACAO, which is required for the servidor-socio match.
+
+    Args:
+        zip_path: Path to the downloaded ZIP file.
+        dest_dir: Destination directory for extraction.
+
+    Returns:
+        Path to the extracted Cadastro CSV file.
+
+    Raises:
+        FileNotFoundError: If no Cadastro CSV is found in the archive.
+    """
     with zipfile.ZipFile(zip_path) as archive:
         csv_names = [n for n in archive.namelist() if n.lower().endswith(".csv")]
         if not csv_names:
             raise FileNotFoundError(f"No CSV found inside {zip_path}")
-        archive.extract(csv_names[0], raw_dir)
 
-    return raw_dir / csv_names[0]
+        cadastro = [n for n in csv_names if "cadastro" in n.lower()]
+        if not cadastro:
+            raise FileNotFoundError(
+                f"No *Cadastro* CSV found inside {zip_path}. "
+                f"Available CSVs: {csv_names}"
+            )
+
+        archive.extract(cadastro[0], dest_dir)
+
+    return dest_dir / cadastro[0]
