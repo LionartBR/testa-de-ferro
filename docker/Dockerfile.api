@@ -4,10 +4,13 @@ RUN groupadd -r app && useradd -r -g app app
 
 WORKDIR /app
 
+# Copy source first (setuptools needs packages for auto-discovery)
 COPY pyproject.toml .
-RUN pip install --no-cache-dir . && pip install --no-cache-dir ".[pdf]"
-
 COPY api/ ./api/
+COPY pipeline/ ./pipeline/
+
+# Install dependencies
+RUN pip install --no-cache-dir .
 
 USER app
 

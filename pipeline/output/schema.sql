@@ -51,7 +51,7 @@ CREATE TABLE dim_orgao (
 
 CREATE TABLE dim_socio (
     pk_socio              INTEGER PRIMARY KEY,
-    cpf_hmac              VARCHAR(64) NOT NULL,
+    cpf_hmac              VARCHAR(64),
     nome                  VARCHAR(255) NOT NULL,
     qualificacao          VARCHAR(100),
     is_servidor_publico   BOOLEAN DEFAULT FALSE,
@@ -81,8 +81,8 @@ CREATE TABLE dim_candidato (
 -- =============================================
 
 CREATE TABLE bridge_fornecedor_socio (
-    fk_fornecedor       INTEGER NOT NULL REFERENCES dim_fornecedor(pk_fornecedor),
-    fk_socio            INTEGER NOT NULL REFERENCES dim_socio(pk_socio),
+    fk_fornecedor       INTEGER NOT NULL,
+    fk_socio            INTEGER NOT NULL,
     data_entrada        DATE,
     data_saida          DATE,
     percentual_capital  DECIMAL(5,2),
@@ -93,12 +93,21 @@ CREATE TABLE bridge_fornecedor_socio (
 -- FATOS
 -- =============================================
 
+-- ADR: FK constraints on fk_fornecedor/fk_orgao/fk_tempo/fk_modalidade are
+-- relaxed (nullable, no FK reference) because the dimension lookup tables
+-- (dim_orgao, dim_tempo, dim_modalidade) are not yet populated by the pipeline.
+-- The raw data columns (cnpj_fornecedor, codigo_orgao, data_assinatura) are
+-- used directly for queries until the full star schema build is implemented.
 CREATE TABLE fato_contrato (
     pk_contrato     INTEGER PRIMARY KEY,
-    fk_fornecedor   INTEGER NOT NULL REFERENCES dim_fornecedor(pk_fornecedor),
-    fk_orgao        INTEGER NOT NULL REFERENCES dim_orgao(pk_orgao),
-    fk_tempo        INTEGER NOT NULL REFERENCES dim_tempo(pk_tempo),
-    fk_modalidade   INTEGER REFERENCES dim_modalidade(pk_modalidade),
+    fk_fornecedor   INTEGER,
+    fk_orgao        INTEGER,
+    fk_tempo        INTEGER,
+    fk_modalidade   INTEGER,
+    cnpj_fornecedor VARCHAR(18),
+    codigo_orgao    VARCHAR(20),
+    nome_orgao      VARCHAR(255),
+    modalidade_nome VARCHAR(100),
     valor           DECIMAL(18,2) NOT NULL,
     objeto          VARCHAR(1000),
     num_licitacao   VARCHAR(50),
@@ -106,20 +115,30 @@ CREATE TABLE fato_contrato (
     data_vigencia   DATE
 );
 
+-- ADR: FK constraints relaxed — dim_candidato and dim_tempo not yet populated.
+-- Raw columns (nome_candidato, data_receita etc.) stored directly.
 CREATE TABLE fato_doacao (
-    pk_doacao       INTEGER PRIMARY KEY,
-    fk_fornecedor   INTEGER REFERENCES dim_fornecedor(pk_fornecedor),
-    fk_socio        INTEGER REFERENCES dim_socio(pk_socio),
-    fk_candidato    INTEGER NOT NULL REFERENCES dim_candidato(pk_candidato),
-    fk_tempo        INTEGER NOT NULL REFERENCES dim_tempo(pk_tempo),
-    valor           DECIMAL(18,2) NOT NULL,
-    tipo_recurso    VARCHAR(50),
-    ano_eleicao     SMALLINT NOT NULL
+    pk_doacao           INTEGER PRIMARY KEY,
+    fk_fornecedor       INTEGER,
+    fk_socio            INTEGER,
+    fk_candidato        INTEGER,
+    fk_tempo            INTEGER,
+    ano_eleicao         SMALLINT NOT NULL,
+    cnpj_doador         VARCHAR(18),
+    cpf_doador          VARCHAR(14),
+    nome_doador         VARCHAR(255),
+    nome_candidato      VARCHAR(255),
+    partido_candidato   VARCHAR(50),
+    cargo_candidato     VARCHAR(100),
+    uf_candidato        CHAR(2),
+    tipo_recurso        VARCHAR(50),
+    valor               DECIMAL(18,2) NOT NULL,
+    data_receita        DATE
 );
 
 CREATE TABLE fato_score_detalhe (
     pk_score_detalhe INTEGER PRIMARY KEY,
-    fk_fornecedor    INTEGER NOT NULL REFERENCES dim_fornecedor(pk_fornecedor),
+    fk_fornecedor    INTEGER NOT NULL,
     indicador        VARCHAR(50) NOT NULL,
     peso             SMALLINT NOT NULL,
     descricao        VARCHAR(500),
@@ -129,8 +148,8 @@ CREATE TABLE fato_score_detalhe (
 
 CREATE TABLE fato_alerta_critico (
     pk_alerta       INTEGER PRIMARY KEY,
-    fk_fornecedor   INTEGER NOT NULL REFERENCES dim_fornecedor(pk_fornecedor),
-    fk_socio        INTEGER REFERENCES dim_socio(pk_socio),
+    fk_fornecedor   INTEGER NOT NULL,
+    fk_socio        INTEGER,
     tipo_alerta     VARCHAR(50) NOT NULL,
     severidade      VARCHAR(20) NOT NULL,
     descricao       VARCHAR(500) NOT NULL,
@@ -140,7 +159,9 @@ CREATE TABLE fato_alerta_critico (
 
 CREATE TABLE dim_sancao (
     pk_sancao           INTEGER PRIMARY KEY,
-    fk_fornecedor       INTEGER NOT NULL REFERENCES dim_fornecedor(pk_fornecedor),
+    fk_fornecedor       INTEGER,
+    cnpj                VARCHAR(18),
+    razao_social        VARCHAR(255),
     tipo_sancao         VARCHAR(50) NOT NULL,
     orgao_sancionador   VARCHAR(255),
     motivo              VARCHAR(500),

@@ -21,11 +21,10 @@ import polars as pl
 
 # All staging files that must be present and non-empty before the DuckDB build.
 #
-# ADR: rais is included as a required source even though the MTE endpoint may
-# occasionally be unavailable. If RAIS is missing, the SEM_FUNCIONARIOS
-# indicator silently produces no rows (the indicator is guarded by a column
-# existence check in score.py). Making it required forces the operator to
-# investigate rather than silently skip a key indicator.
+# ADR: rais moved to OPTIONAL_SOURCES because the MTE FTP endpoint is
+# frequently unavailable or reorganised. When RAIS is missing, the
+# SEM_FUNCIONARIOS score indicator silently produces no rows (guarded by a
+# column existence check in score.py). A warning is logged instead of abort.
 REQUIRED_SOURCES: tuple[str, ...] = (
     "empresas",
     "qsa",
@@ -33,6 +32,9 @@ REQUIRED_SOURCES: tuple[str, ...] = (
     "sancoes",
     "servidores",
     "doacoes",
+)
+
+OPTIONAL_SOURCES: tuple[str, ...] = (
     "rais",
 )
 
@@ -67,3 +69,14 @@ def validar_completude(staging_dir: Path) -> None:
             raise CompletudeError(
                 f"Empty staging file: {source}.parquet (0 rows). Re-run the corresponding source pipeline."
             )
+
+    import sys
+
+    for source in OPTIONAL_SOURCES:
+        path = staging_dir / f"{source}.parquet"
+        if not path.exists():
+            print(f"  WARNING: optional source '{source}' missing — skipping.", file=sys.stderr)
+        else:
+            row_count = pl.scan_parquet(path).select(pl.len()).collect().item()
+            if row_count == 0:
+                print(f"  WARNING: optional source '{source}' has 0 rows — skipping.", file=sys.stderr)

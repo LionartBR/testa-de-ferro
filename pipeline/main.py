@@ -41,6 +41,12 @@ from pipeline.transform.score import calcular_scores_batch
 def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path:
     """Execute the full pipeline and produce the DuckDB database.
 
+    ADR: Memory-phased pipeline.
+      With only ~8 GB RAM, loading all DataFrames simultaneously causes OOM.
+      Each phase loads only what it needs, writes results to staging parquet,
+      then explicitly frees memory with ``del`` + ``gc.collect()``.
+      Transforms run sequentially (not in parallel) to halve peak memory.
+
     Args:
         config: Pipeline configuration with paths, salt, and URLs.
         skip_download: If True, skip download+parse+validate steps and read
@@ -53,109 +59,147 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
         pipeline.output.completude.CompletudeError: if any required staging file
             is missing or empty after the source step.
     """
+    import gc
+
     staging_dir = config.staging_dir
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     if not skip_download:
         _run_sources(config)
 
-    # ---- Read staging data ----
-    log("Reading staging parquets...")
-    empresas_df = read_parquet(staging_dir / "empresas.parquet")
-    qsa_df = read_parquet(staging_dir / "qsa.parquet")
-    contratos_df = read_parquet(staging_dir / "contratos.parquet")
-    sancoes_df = read_parquet(staging_dir / "sancoes.parquet")
-    servidores_df = read_parquet(staging_dir / "servidores.parquet")
-    doacoes_df = read_parquet(staging_dir / "doacoes.parquet")
+    # ==== Phase A: Merge optional sources into base staging parquets ====
+    # Each merge loads only the two DataFrames it needs, writes the result,
+    # and frees both before proceeding.
+    log("Phase A: Merging optional sources...")
 
-    # Merge RAIS employee counts into empresas (adds qtd_funcionarios column).
+    # A1. Merge RAIS into empresas
     rais_path = staging_dir / "rais.parquet"
     if rais_path.exists():
+        empresas_df = read_parquet(staging_dir / "empresas.parquet")
         rais_df = read_parquet(rais_path)
         empresas_df = _merge_rais_into_empresas(empresas_df, rais_df)
-        log(f"  Merged RAIS: qtd_funcionarios column added to {len(empresas_df):,} fornecedores")
+        write_parquet(empresas_df, staging_dir / "empresas.parquet")
+        log(f"  Merged RAIS: qtd_funcionarios added to {len(empresas_df):,} fornecedores")
+        del empresas_df, rais_df
+        gc.collect()
 
-    # Merge juntas_comerciais QSA diffs into the base QSA (concat + dedup).
+    # A2. Merge juntas_comerciais QSA diffs
     juntas_path = staging_dir / "juntas_comerciais.parquet"
     if juntas_path.exists():
+        qsa_df = read_parquet(staging_dir / "qsa.parquet")
         juntas_df = read_parquet(juntas_path)
         qsa_df = _merge_qsa_diffs(qsa_df, juntas_df)
-        log(f"  Merged QSA diffs: {len(qsa_df):,} total socio rows after merge")
+        write_parquet(qsa_df, staging_dir / "qsa.parquet")
+        log(f"  Merged QSA diffs: {len(qsa_df):,} total socio rows")
+        del qsa_df, juntas_df
+        gc.collect()
 
-    # Merge Comprasnet contracts into the PNCP contratos (concat + dedup).
+    # A3. Merge Comprasnet into PNCP contratos
     comprasnet_path = staging_dir / "comprasnet.parquet"
     if comprasnet_path.exists():
+        contratos_df = read_parquet(staging_dir / "contratos.parquet")
         comprasnet_df = read_parquet(comprasnet_path)
         contratos_df = _merge_contratos(contratos_df, comprasnet_df)
-        log(f"  Merged Comprasnet: {len(contratos_df):,} total contract rows after merge")
+        write_parquet(contratos_df, staging_dir / "contratos.parquet")
+        log(f"  Merged Comprasnet: {len(contratos_df):,} total contracts")
+        del contratos_df, comprasnet_df
+        gc.collect()
 
-    # ---- Transforms ----
-    log("Running transforms...")
+    # ==== Phase B: Servidor-socio match + HMAC + enrichments ====
+    # Loads QSA + servidores, matches, then frees servidores.
+    # Then loads sancoes + empresas for enrichment, frees them after.
+    log("Phase B: Servidor-socio match + HMAC + enrichments...")
 
-    # 1. Match servidores against socios (needs cpf_parcial, so run BEFORE HMAC)
+    qsa_df = read_parquet(staging_dir / "qsa.parquet")
+    servidores_df = read_parquet(staging_dir / "servidores.parquet")
     socios_enriched = match_servidor_socio(qsa_df, servidores_df)
     log(f"  Servidor-socio match: {len(socios_enriched):,} rows")
+    del qsa_df, servidores_df
+    gc.collect()
 
-    # 2. HMAC CPFs in enriched socios (if cpf column exists)
+    # HMAC CPFs (must run after match, before enrichment)
     if "cpf_parcial" in socios_enriched.columns:
         socios_enriched = apply_hmac_to_df(socios_enriched, "cpf_parcial", config.cpf_hmac_salt)
 
-    # 3. Cross-reference enrichments
+    # Cross-reference enrichments (needs sancoes + empresas)
+    sancoes_df = read_parquet(staging_dir / "sancoes.parquet")
+    empresas_df = read_parquet(staging_dir / "empresas.parquet")
     socios_enriched = enriquecer_socios(socios_enriched, sancoes_df, empresas_df)
     log(f"  Enriched socios: {len(socios_enriched):,} rows")
+    del sancoes_df, empresas_df
+    gc.collect()
 
-    # 4–6. Pre-compute scores, alerts, and graph in parallel.
-    # ADR: The three computations are fully independent — none reads the output of
-    # another, and all three take only the already-materialised DataFrames as input.
-    # ThreadPoolExecutor is sufficient (vs ProcessPoolExecutor) because Polars
-    # group_by/join operations release the GIL internally.
-    from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
+    # Write enriched socios to staging (dim_socio schema)
+    socios_for_staging = _prepare_socios_staging(socios_enriched)
+    write_parquet(socios_for_staging, staging_dir / "socios.parquet")
+    del socios_for_staging
 
-    log("Computing scores, alerts, and graph in parallel...")
+    # Save enriched socios as temporary parquet for later phases
+    write_parquet(socios_enriched, staging_dir / "_socios_enriched.parquet")
+    del socios_enriched
+    gc.collect()
 
-    def _compute_scores() -> pl.DataFrame:
-        df = calcular_scores_batch(empresas_df, socios_enriched, contratos_df, sancoes_df)
-        write_parquet(df, staging_dir / "score_detalhe.parquet")
-        return df
+    # ==== Phase C: Compute scores (sequential to save memory) ====
+    log("Phase C: Computing scores...")
+    empresas_df = read_parquet(staging_dir / "empresas.parquet")
+    socios_enriched = read_parquet(staging_dir / "_socios_enriched.parquet")
+    contratos_df = read_parquet(staging_dir / "contratos.parquet")
+    sancoes_df = read_parquet(staging_dir / "sancoes.parquet")
 
-    def _compute_alertas() -> pl.DataFrame:
-        df = detectar_alertas_batch(empresas_df, socios_enriched, contratos_df, sancoes_df, doacoes_df)
-        write_parquet(df, staging_dir / "alertas.parquet")
-        return df
-
-    def _compute_grafo() -> tuple[pl.DataFrame, pl.DataFrame]:
-        nos, arestas = construir_grafo(socios_enriched, empresas_df)
-        write_parquet(nos, staging_dir / "grafo_nos.parquet")
-        write_parquet(arestas, staging_dir / "grafo_arestas.parquet")
-        return nos, arestas
-
-    with _ThreadPoolExecutor(max_workers=3) as pool:
-        score_future = pool.submit(_compute_scores)
-        alerta_future = pool.submit(_compute_alertas)
-        grafo_future = pool.submit(_compute_grafo)
-
-    scores_df = score_future.result()
+    scores_df = calcular_scores_batch(empresas_df, socios_enriched, contratos_df, sancoes_df)
+    write_parquet(scores_df, staging_dir / "score_detalhe.parquet")
     log(f"  Scores: {len(scores_df):,} rows")
-    alertas_df = alerta_future.result()
-    log(f"  Alertas: {len(alertas_df):,} rows")
-    nos_df, arestas_df = grafo_future.result()
-    log(f"  Grafo: {len(nos_df):,} nodes, {len(arestas_df):,} edges")
+    del empresas_df, socios_enriched, contratos_df, sancoes_df, scores_df
+    gc.collect()
 
-    # 7. Denormalize aggregate columns into empresas (dim_fornecedor)
-    log("Denormalizing dim_fornecedor aggregates...")
+    # ==== Phase D: Compute alertas ====
+    log("Phase D: Computing alertas...")
+    empresas_df = read_parquet(staging_dir / "empresas.parquet")
+    socios_enriched = read_parquet(staging_dir / "_socios_enriched.parquet")
+    contratos_df = read_parquet(staging_dir / "contratos.parquet")
+    sancoes_df = read_parquet(staging_dir / "sancoes.parquet")
+    doacoes_df = read_parquet(staging_dir / "doacoes.parquet")
+
+    alertas_df = detectar_alertas_batch(empresas_df, socios_enriched, contratos_df, sancoes_df, doacoes_df)
+    write_parquet(alertas_df, staging_dir / "alertas.parquet")
+    log(f"  Alertas: {len(alertas_df):,} rows")
+    del empresas_df, socios_enriched, contratos_df, sancoes_df, doacoes_df, alertas_df
+    gc.collect()
+
+    # ==== Phase E: Compute grafo ====
+    log("Phase E: Computing grafo...")
+    socios_enriched = read_parquet(staging_dir / "_socios_enriched.parquet")
+    empresas_df = read_parquet(staging_dir / "empresas.parquet")
+
+    nos_df, arestas_df = construir_grafo(socios_enriched, empresas_df)
+    write_parquet(nos_df, staging_dir / "grafo_nos.parquet")
+    write_parquet(arestas_df, staging_dir / "grafo_arestas.parquet")
+    log(f"  Grafo: {len(nos_df):,} nodes, {len(arestas_df):,} edges")
+    del socios_enriched, empresas_df, nos_df, arestas_df
+    gc.collect()
+
+    # ==== Phase F: Denormalize dim_fornecedor ====
+    log("Phase F: Denormalizing dim_fornecedor...")
+    empresas_df = read_parquet(staging_dir / "empresas.parquet")
+    scores_df = read_parquet(staging_dir / "score_detalhe.parquet")
+    alertas_df = read_parquet(staging_dir / "alertas.parquet")
+    contratos_df = read_parquet(staging_dir / "contratos.parquet")
+
     empresas_df = _denormalize_fornecedor(empresas_df, scores_df, alertas_df, contratos_df)
     write_parquet(empresas_df, staging_dir / "empresas.parquet")
     log(f"  Denormalized {len(empresas_df):,} fornecedores")
+    del empresas_df, scores_df, alertas_df, contratos_df
+    gc.collect()
 
-    # 8. Write enriched socios to staging — rename to match dim_socio schema
-    socios_for_staging = _prepare_socios_staging(socios_enriched)
-    write_parquet(socios_for_staging, staging_dir / "socios.parquet")
+    # Clean up temporary file
+    temp_socios = staging_dir / "_socios_enriched.parquet"
+    if temp_socios.exists():
+        temp_socios.unlink()
 
-    # ---- Validate completude ----
-    log("Validating completude...")
+    # ==== Phase G: Validate completude + Build DuckDB ====
+    log("Phase G: Validating completude...")
     validar_completude(staging_dir)
 
-    # ---- Build DuckDB ----
     log("Building DuckDB...")
     output_path = build_duckdb(staging_dir, config.duckdb_output_path)
     log(f"Done. DuckDB written to: {output_path}")
@@ -213,6 +257,18 @@ def _merge_contratos(contratos_df: pl.DataFrame, comprasnet_df: pl.DataFrame) ->
     """
     if comprasnet_df.is_empty():
         return contratos_df
+
+    # Cast Null-typed columns (e.g. all-null FK columns read from Parquet)
+    # to Int64 so they're compatible with the other DataFrame's schema.
+    for df_name in ("contratos_df", "comprasnet_df"):
+        df = contratos_df if df_name == "contratos_df" else comprasnet_df
+        null_cols = [c for c in df.columns if df.schema[c] == pl.Null]
+        if null_cols:
+            df = df.with_columns([pl.col(c).cast(pl.Int64) for c in null_cols])
+            if df_name == "contratos_df":
+                contratos_df = df
+            else:
+                comprasnet_df = df
 
     merged = pl.concat([contratos_df, comprasnet_df], how="diagonal")
 
@@ -526,5 +582,8 @@ def _run_sources(config: PipelineConfig) -> None:
 
 
 if __name__ == "__main__":
+    import sys
+
     cfg = load_config()
-    run_pipeline(cfg)
+    skip = "--skip-download" in sys.argv
+    run_pipeline(cfg, skip_download=skip)

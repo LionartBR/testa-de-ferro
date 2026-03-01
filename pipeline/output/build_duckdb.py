@@ -45,6 +45,11 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 # Order matters: dimension tables must be loaded before fact/bridge tables
 # that reference them via foreign keys.
 # ---------------------------------------------------------------------------
+# ADR: Tables whose staging parquets don't yet exist are silently skipped
+# by _load_staging_data. Dimension lookup tables (dim_orgao, dim_tempo,
+# dim_modalidade, dim_candidato) and bridge_fornecedor_socio require FK
+# resolution logic not yet implemented. They are kept in the mapping so
+# they will be auto-loaded when their staging parquets become available.
 STAGING_TO_TABLE: dict[str, str] = {
     # Dimension tables (no FK dependencies on other dims)
     "empresas": "dim_fornecedor",
@@ -54,7 +59,7 @@ STAGING_TO_TABLE: dict[str, str] = {
     "candidatos": "dim_candidato",
     "tempo": "dim_tempo",
     # Bridge table (depends on dim_fornecedor + dim_socio)
-    "qsa": "bridge_fornecedor_socio",
+    # "qsa": "bridge_fornecedor_socio",  # TODO: needs FK resolution
     # Fact tables (depend on multiple dimensions)
     "contratos": "fato_contrato",
     "doacoes": "fato_doacao",
