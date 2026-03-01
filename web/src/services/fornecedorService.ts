@@ -1,9 +1,10 @@
 import { apiFetch, apiFetchBlob } from "./api";
+import { cnpjToParam } from "@/lib/formatters";
 import type { FornecedorResumo, FichaCompleta } from "@/types/fornecedor";
 import type { Grafo } from "@/types/grafo";
 
 export function getFicha(cnpj: string): Promise<FichaCompleta> {
-  return apiFetch(`/fornecedores/${encodeURIComponent(cnpj)}`);
+  return apiFetch(`/fornecedores/${cnpjToParam(cnpj)}`);
 }
 
 export function getRanking(
@@ -14,7 +15,7 @@ export function getRanking(
 }
 
 export function getGrafo(cnpj: string): Promise<Grafo> {
-  return apiFetch(`/fornecedores/${encodeURIComponent(cnpj)}/grafo`);
+  return apiFetch(`/fornecedores/${cnpjToParam(cnpj)}/grafo`);
 }
 
 export type FormatoExport = "csv" | "json" | "pdf";
@@ -24,6 +25,6 @@ export async function exportar(
   formato: FormatoExport,
 ): Promise<Blob> {
   return apiFetchBlob(
-    `/fornecedores/${encodeURIComponent(cnpj)}/export?formato=${formato}`,
+    `/fornecedores/${cnpjToParam(cnpj)}/export?formato=${formato}`,
   );
 }

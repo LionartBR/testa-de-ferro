@@ -13,6 +13,7 @@
 import { Link } from "react-router-dom";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { cnpjToParam } from "@/lib/formatters";
 import type { Grafo } from "@/types/grafo";
 
 interface GrafoMiniProps {
@@ -21,7 +22,7 @@ interface GrafoMiniProps {
 }
 
 export function GrafoMini({ cnpj, grafo }: GrafoMiniProps) {
-  const graphUrl = `/fornecedores/${encodeURIComponent(cnpj)}/grafo`;
+  const graphUrl = `/fornecedores/${cnpjToParam(cnpj)}/grafo`;
 
   return (
     <Card>

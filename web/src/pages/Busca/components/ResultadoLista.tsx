@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/Card";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { CNPJFormatado } from "@/components/CNPJFormatado";
 import { ValorMonetario } from "@/components/ValorMonetario";
+import { cnpjToParam } from "@/lib/formatters";
 import type { FornecedorResumo } from "@/types/fornecedor";
 
 interface ResultadoListaProps {
@@ -15,7 +16,7 @@ export function ResultadoLista({ resultados }: ResultadoListaProps) {
       {resultados.map((item) => (
         <li key={item.cnpj}>
           <Link
-            to={`/fornecedores/${encodeURIComponent(item.cnpj)}`}
+            to={`/fornecedores/${cnpjToParam(item.cnpj)}`}
             className="block focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded-lg"
           >
             <Card className="hover:border-blue-300 hover:shadow-md transition-shadow">

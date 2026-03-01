@@ -1,3 +1,8 @@
+/** Strips non-digits from a CNPJ so it can be used safely in URL paths. */
+export function cnpjToParam(cnpj: string): string {
+  return cnpj.replace(/\D/g, "");
+}
+
 export function formatCNPJ(cnpj: string): string {
   const digits = cnpj.replace(/\D/g, "");
   if (digits.length !== 14) return cnpj;

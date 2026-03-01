@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { formatCNPJ } from "@/lib/formatters";
+import { formatCNPJ, cnpjToParam } from "@/lib/formatters";
 
 interface CNPJFormatadoProps {
   cnpj: string;
@@ -12,7 +12,7 @@ export function CNPJFormatado({ cnpj, link = true }: CNPJFormatadoProps) {
   if (link) {
     return (
       <Link
-        to={`/fornecedores/${encodeURIComponent(cnpj)}`}
+        to={`/fornecedores/${cnpjToParam(cnpj)}`}
         className="font-mono text-blue-600 hover:underline"
       >
         {formatted}
