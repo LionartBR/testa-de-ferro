@@ -20,6 +20,7 @@ import polars as pl
 
 from pipeline.transform.alertas import (
     _rodizio_licitacao_batch,  # type: ignore[attr-defined]  # private API under test
+    _socio_sancionado_em_outra_batch,  # type: ignore[attr-defined]  # private API under test
     _testa_de_ferro_batch,  # type: ignore[attr-defined]  # private API under test
 )
 
@@ -466,3 +467,76 @@ def test_testa_de_ferro_dataframe_vazio_nao_crasha() -> None:
     rows = _testa_de_ferro_batch(empresas, socios, contratos, _DETECTADO_EM)
 
     assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# _socio_sancionado_em_outra_batch
+# ---------------------------------------------------------------------------
+
+
+def _make_socios_sancionado(
+    cnpj_basicos: list[str],
+    nomes: list[str],
+    is_sancionado: list[bool],
+    sancionado_cnpj_basicos: list[str | None] | None = None,
+    sancionado_razao_socials: list[str | None] | None = None,
+) -> pl.DataFrame:
+    """Build a socios DataFrame with is_sancionado and enrichment columns."""
+    n = len(cnpj_basicos)
+    data: dict[str, object] = {
+        "cnpj_basico": cnpj_basicos,
+        "nome_socio": nomes,
+        "is_sancionado": is_sancionado,
+    }
+    if sancionado_cnpj_basicos is not None:
+        data["sancionado_cnpj_basico"] = sancionado_cnpj_basicos
+    if sancionado_razao_socials is not None:
+        data["sancionado_razao_social"] = sancionado_razao_socials
+    return pl.DataFrame(data)
+
+
+def test_socio_sancionado_em_outra_gera_alerta_grave() -> None:
+    """Sócio flagged is_sancionado → alerta GRAVE com evidência da empresa sancionada."""
+    empresas = _make_empresas(
+        pk_fornecedores=[1, 2],
+        cnpj_basicos=["11111111", "22222222"],
+    )
+    # Sócio JOAO is in company 22222222 but is flagged because company 11111111 is sanctioned.
+    socios = _make_socios_sancionado(
+        cnpj_basicos=["22222222"],
+        nomes=["JOAO SILVA"],
+        is_sancionado=[True],
+        sancionado_cnpj_basicos=["11111111"],
+        sancionado_razao_socials=["EMPRESA SANCIONADA LTDA"],
+    )
+
+    rows = _socio_sancionado_em_outra_batch(empresas, socios, _DETECTADO_EM)
+
+    assert len(rows) == 1
+    assert rows[0]["tipo_alerta"] == "SOCIO_SANCIONADO_EM_OUTRA"
+    assert rows[0]["severidade"] == "GRAVE"
+    assert "EMPRESA SANCIONADA LTDA" in str(rows[0]["evidencia"]), (
+        "Evidência deve incluir razão social da empresa sancionada"
+    )
+
+
+def test_socio_sancionado_em_outra_evidencia_inclui_cnpj_sancionado() -> None:
+    """Evidência do alerta deve incluir o CNPJ da empresa sancionada para rastreabilidade."""
+    empresas = _make_empresas(
+        pk_fornecedores=[1, 2],
+        cnpj_basicos=["11111111", "22222222"],
+    )
+    socios = _make_socios_sancionado(
+        cnpj_basicos=["22222222"],
+        nomes=["MARIA OLIVEIRA"],
+        is_sancionado=[True],
+        sancionado_cnpj_basicos=["11111111"],
+        sancionado_razao_socials=["CONSTRUTORA FANTASMA SA"],
+    )
+
+    rows = _socio_sancionado_em_outra_batch(empresas, socios, _DETECTADO_EM)
+
+    assert len(rows) == 1
+    evidencia = str(rows[0]["evidencia"])
+    assert "11111111" in evidencia, "Evidência deve incluir CNPJ da empresa sancionada"
+    assert "CONSTRUTORA FANTASMA SA" in evidencia, "Evidência deve incluir razão social"

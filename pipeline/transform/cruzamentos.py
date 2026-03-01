@@ -29,6 +29,8 @@
 #   - Returned DataFrames carry a superset of the input columns.
 from __future__ import annotations
 
+from datetime import date
+
 import polars as pl
 
 
@@ -36,13 +38,22 @@ def enriquecer_socios(
     socios_df: pl.DataFrame,
     sancoes_df: pl.DataFrame,
     empresas_df: pl.DataFrame,
+    *,
+    referencia: date | None = None,
 ) -> pl.DataFrame:
     """Enrich sócios with sanction and multi-company flags.
 
-    Computes two derived fields for every row in *socios_df*:
+    Computes derived fields for every row in *socios_df*:
 
     - ``is_sancionado`` (bool): True when this sócio appears as a sócio of
-      at least one company that has a sanction record in *sancoes_df*.
+      at least one company that has an **active** sanction (data_fim is NULL
+      or data_fim > referencia). Expired sanctions never set this flag.
+
+    - ``sancionado_cnpj_basico`` (str|null): CNPJ root of the sanctioned
+      company (for traceability in alert evidence).
+
+    - ``sancionado_razao_social`` (str|null): Razão social of the sanctioned
+      company (for traceability in alert evidence).
 
     - ``qtd_empresas_governo``: count of distinct CNPJs (from *empresas_df*)
       in which this sócio (identified by ``nome_socio``) appears.
@@ -50,33 +61,61 @@ def enriquecer_socios(
     Args:
         socios_df:   DataFrame with columns: cnpj_basico (str), nome_socio (str).
                      May include additional columns (all preserved).
-        sancoes_df:  DataFrame with column: cnpj (str, formatted or basico).
-                     Represents companies with at least one sanction.
+        sancoes_df:  DataFrame with column: cnpj (str, formatted or basico),
+                     data_fim (date|null). Represents companies with sanctions.
         empresas_df: DataFrame with columns: cnpj_basico (str), cnpj (str).
                      Represents all government-supplier companies.
+        referencia:  Reference date for filtering active sanctions. Defaults to
+                     today if not provided. Passed explicitly to keep the
+                     function pure and testable.
 
     Returns:
-        socios_df with two additional columns: is_sancionado, qtd_empresas_governo.
+        socios_df with additional columns: is_sancionado, sancionado_cnpj_basico,
+        sancionado_razao_social, qtd_empresas_governo.
     """
+    if referencia is None:
+        referencia = date.today()
+
     # ------------------------------------------------------------------
-    # is_sancionado: sócio's company has a sanction
+    # is_sancionado: sócio's company has an ACTIVE sanction
     # ------------------------------------------------------------------
+    # ADR: "Sanção expirada → indicador SANCAO_HISTORICA (score). Nunca alerta."
+    # Filter to active sanctions only: data_fim is NULL (indefinite) or > referencia.
+    if "data_fim" in sancoes_df.columns:
+        sancoes_vigentes = sancoes_df.filter(
+            pl.col("data_fim").is_null() | (pl.col("data_fim").cast(pl.Date) > pl.lit(referencia))
+        )
+    else:
+        sancoes_vigentes = sancoes_df
+
     # Extract the 8-digit CNPJ root from the sancoes table so we can join
     # against the QSA cnpj_basico.
-    if "cnpj_basico" in sancoes_df.columns:
-        sancionados_basico = sancoes_df.select(pl.col("cnpj_basico").alias("_cnpj_basico_sancionado")).unique()
+    if "cnpj_basico" in sancoes_vigentes.columns:
+        sancionados_basico = sancoes_vigentes.select(
+            pl.col("cnpj_basico").alias("_cnpj_basico_sancionado"),
+        ).unique()
     else:
         # Fall back: derive basico from formatted CNPJ by stripping punctuation.
-        sancionados_basico = sancoes_df.select(
-            pl.col("cnpj").str.replace_all(r"[.\-/]", "").str.slice(0, 8).alias("_cnpj_basico_sancionado")
+        sancionados_basico = sancoes_vigentes.select(
+            pl.col("cnpj").str.replace_all(r"[.\-/]", "").str.slice(0, 8).alias("_cnpj_basico_sancionado"),
         ).unique()
 
     # is_in on a Polars Series is fully vectorized — no Python-level row
     # iteration unlike map_elements with a set lookup lambda.
-    # Pass a plain Python list to avoid the deprecation warning that Polars
-    # raises when is_in receives a Series of the same dtype (requires .implode()).
     sancionados_list = sancionados_basico["_cnpj_basico_sancionado"].drop_nulls().to_list()
     is_sancionado_series = socios_df["cnpj_basico"].is_in(sancionados_list).alias("is_sancionado")
+
+    # ------------------------------------------------------------------
+    # Propagate sanctioned company identity for evidence traceability
+    # ------------------------------------------------------------------
+    # Build a lookup: cnpj_basico → razao_social of the sanctioned company.
+    if "razao_social" in sancoes_vigentes.columns and "cnpj_basico" in sancoes_vigentes.columns:
+        sancionados_info = sancoes_vigentes.select(
+            pl.col("cnpj_basico").alias("_sanc_cnpj_basico"),
+            pl.col("razao_social").alias("sancionado_razao_social"),
+        ).unique(subset=["_sanc_cnpj_basico"])
+    else:
+        sancionados_info = None
 
     # ------------------------------------------------------------------
     # qtd_empresas_governo: count of distinct CNPJs per sócio by name
@@ -96,9 +135,35 @@ def enriquecer_socios(
         pl.col("cnpj_basico").n_unique().alias("_qtd_empresas_governo")
     )
 
+    enriched = socios_df.with_columns(is_sancionado_series)
+
+    # Join sanctioned company info for evidence traceability.
+    if sancionados_info is not None:
+        enriched = (
+            enriched.join(sancionados_info, left_on="cnpj_basico", right_on="_sanc_cnpj_basico", how="left")
+            .with_columns(
+                pl.col("cnpj_basico").alias("sancionado_cnpj_basico"),
+            )
+        )
+        # Only keep sancionado columns when is_sancionado is True.
+        enriched = enriched.with_columns(
+            pl.when(pl.col("is_sancionado"))
+            .then(pl.col("sancionado_cnpj_basico"))
+            .otherwise(pl.lit(None))
+            .alias("sancionado_cnpj_basico"),
+            pl.when(pl.col("is_sancionado"))
+            .then(pl.col("sancionado_razao_social"))
+            .otherwise(pl.lit(None))
+            .alias("sancionado_razao_social"),
+        )
+    else:
+        enriched = enriched.with_columns(
+            pl.lit(None).cast(pl.Utf8).alias("sancionado_cnpj_basico"),
+            pl.lit(None).cast(pl.Utf8).alias("sancionado_razao_social"),
+        )
+
     enriched = (
-        socios_df.with_columns(is_sancionado_series)
-        .join(nome_count, on="nome_socio", how="left")
+        enriched.join(nome_count, on="nome_socio", how="left")
         .with_columns(pl.col("_qtd_empresas_governo").fill_null(0).alias("qtd_empresas_governo"))
         .drop("_qtd_empresas_governo")
     )

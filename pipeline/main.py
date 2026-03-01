@@ -124,7 +124,7 @@ def run_pipeline(config: PipelineConfig, *, skip_download: bool = False) -> Path
     # Cross-reference enrichments (needs sancoes + empresas)
     sancoes_df = read_parquet(staging_dir / "sancoes.parquet")
     empresas_df = read_parquet(staging_dir / "empresas.parquet")
-    socios_enriched = enriquecer_socios(socios_enriched, sancoes_df, empresas_df)
+    socios_enriched = enriquecer_socios(socios_enriched, sancoes_df, empresas_df, referencia=None)
     log(f"  Enriched socios: {len(socios_enriched):,} rows")
     del sancoes_df, empresas_df
     gc.collect()

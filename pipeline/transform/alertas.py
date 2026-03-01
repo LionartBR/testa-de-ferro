@@ -408,9 +408,11 @@ def _socio_sancionado_em_outra_batch(
 
     pk_socio_col = "pk_socio" if "pk_socio" in joined.columns else None
     has_cpf_hmac = "cpf_hmac" in joined.columns
+    has_sancionado_info = (
+        "sancionado_cnpj_basico" in joined.columns and "sancionado_razao_social" in joined.columns
+    )
 
-    # Build evidencia: optionally prefixed with "socio_cpf_hmac={hmac}, " when
-    # cpf_hmac is present and non-null, then "nome={nome}".
+    # Build evidencia: nome + optional cpf_hmac + sanctioned company info.
     base_evidencia_expr = pl.concat_str([pl.lit("nome="), pl.col("nome_socio")])
 
     if has_cpf_hmac:
@@ -421,14 +423,54 @@ def _socio_sancionado_em_outra_batch(
         )
         base_evidencia_expr = pl.concat_str([prefix_expr, base_evidencia_expr])
 
+    if has_sancionado_info:
+        sanc_suffix = (
+            pl.when(pl.col("sancionado_cnpj_basico").is_not_null())
+            .then(
+                pl.concat_str([
+                    pl.lit(", empresa_sancionada_cnpj="),
+                    pl.col("sancionado_cnpj_basico"),
+                    pl.lit(", empresa_sancionada_razao="),
+                    pl.col("sancionado_razao_social").fill_null(pl.lit("N/A")),
+                ])
+            )
+            .otherwise(pl.lit(""))
+        )
+        base_evidencia_expr = pl.concat_str([base_evidencia_expr, sanc_suffix])
+
+    # Build descricao: include sanctioned company name when available.
+    if has_sancionado_info:
+        descricao_expr = (
+            pl.when(pl.col("sancionado_razao_social").is_not_null())
+            .then(
+                pl.concat_str([
+                    pl.lit("Socio "),
+                    pl.col("nome_socio"),
+                    pl.lit(" e socio de empresa sancionada "),
+                    pl.col("sancionado_razao_social"),
+                ])
+            )
+            .otherwise(
+                pl.concat_str([
+                    pl.lit("Socio "),
+                    pl.col("nome_socio"),
+                    pl.lit(" e socio de outra empresa sancionada"),
+                ])
+            )
+        )
+    else:
+        descricao_expr = pl.concat_str([
+            pl.lit("Socio "),
+            pl.col("nome_socio"),
+            pl.lit(" e socio de outra empresa sancionada"),
+        ])
+
     select_exprs: list[pl.Expr] = [
         pl.col("pk_fornecedor").alias("fk_fornecedor"),
         pl.lit(None).cast(pl.Int64).alias("fk_socio"),
         pl.lit(_SOCIO_SANCIONADO_EM_OUTRA).alias("tipo_alerta"),
         pl.lit(_GRAVE).alias("severidade"),
-        pl.concat_str([pl.lit("Socio "), pl.col("nome_socio"), pl.lit(" e socio de outra empresa sancionada")]).alias(
-            "descricao"
-        ),
+        descricao_expr.alias("descricao"),
         base_evidencia_expr.alias("evidencia"),
         pl.lit(detectado_em).alias("detectado_em"),
     ]
